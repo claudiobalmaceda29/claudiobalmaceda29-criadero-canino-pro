@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a192f"/>
+      <stop offset="50%" stop-color="#0f2b48"/>
+      <stop offset="100%" stop-color="#1e3a8a"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#2563eb" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect x="16" y="16" width="480" height="480" rx="96" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="4"/>
+  <!-- Shield outline -->
+  <path d="M256 64 C340 64, 400 110, 400 220 C400 340, 256 430, 256 448 C256 430, 112 340, 112 220 C112 110, 172 64, 256 64 Z" 
+        fill="rgba(15, 23, 42, 0.6)" stroke="url(#accent)" stroke-width="8" filter="url(#glow)"/>
+  <!-- Dog head silhouette - elegant German Shepherd / noble dog profile -->
+  <g fill="none" stroke="url(#accent)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Ears -->
+    <path d="M205 130 L235 200 L180 195 Z" fill="url(#accent)" fill-opacity="0.25"/>
+    <path d="M285 110 L315 205 L260 195 Z" fill="url(#accent)" fill-opacity="0.4"/>
+    <!-- Head and Muzzle -->
+    <path d="M260 195 C280 200, 340 220, 360 250 C370 265, 360 285, 330 288 L280 288 C260 320, 235 340, 200 350 C180 320, 175 270, 185 240 C190 220, 210 205, 235 200" fill="url(#accent)" fill-opacity="0.15"/>
+    <!-- Eye -->
+    <circle cx="280" cy="235" r="7" fill="#38bdf8"/>
+    <!-- Nose -->
+    <ellipse cx="355" cy="265" rx="8" ry="10" fill="#38bdf8"/>
+  </g>
+  <!-- Crown / Pedigree Stars on top -->
+  <g fill="url(#gold)">
+    <circle cx="256" cy="115" r="9"/>
+    <circle cx="225" cy="122" r="7"/>
+    <circle cx="287" cy="122" r="7"/>
+  </g>
+  <!-- Base Pedigree Ribbon Banner -->
+  <path d="M160 380 Q256 405 352 380 L360 410 Q256 435 152 410 Z" fill="url(#accent)"/>
+  <text x="256" y="402" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="19" fill="#ffffff" letter-spacing="3">POA • PEDIGREE</text>
+</svg>

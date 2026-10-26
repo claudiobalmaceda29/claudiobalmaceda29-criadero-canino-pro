@@ -1,0 +1,8 @@
+{
+  "name": "MI CRIADERO CANINO",
+  "description": "Plataforma integral para la gestión profesional de criaderos caninos, genealogía, reproducción, sanidad, camadas, cachorros, exposiciones y administración.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

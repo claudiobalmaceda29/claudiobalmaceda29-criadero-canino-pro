@@ -1,0 +1,168 @@
+{
+  "entities": {
+    "Criadero": {
+      "title": "Criadero",
+      "description": "Entidad de criadero canino",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nombre": { "type": "string" },
+        "afijo": { "type": "string" },
+        "registroPOA": { "type": "string" },
+        "responsable": { "type": "string" },
+        "email": { "type": "string" },
+        "telefono": { "type": "string" },
+        "ciudad": { "type": "string" },
+        "provincia": { "type": "string" },
+        "pais": { "type": "string" },
+        "direccion": { "type": "string" },
+        "activo": { "type": "boolean" },
+        "monedaDefault": { "type": "string", "enum": ["ARS", "USD"] },
+        "ownerUid": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "nombre", "afijo"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Perfil de usuario del criadero",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nombre": { "type": "string" },
+        "email": { "type": "string" },
+        "rol": { "type": "string", "enum": ["SUPER_ADMIN", "CRIADOR", "DEMO"] },
+        "criaderoId": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "nombre", "email", "rol", "criaderoId"]
+    },
+    "Ejemplar": {
+      "title": "Ejemplar",
+      "description": "Perro adulto o reproductor registrado en el criadero",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "criaderoId": { "type": "string" },
+        "nombreCompleto": { "type": "string" },
+        "afijo": { "type": "string" },
+        "sexo": { "type": "string", "enum": ["MACHO", "HEMBRA"] },
+        "raza": { "type": "string" },
+        "fechaNacimiento": { "type": "string" },
+        "numeroPOA": { "type": "string" },
+        "microchip": { "type": "string" },
+        "estadoReproductivo": { "type": "string" },
+        "estado": { "type": "string" },
+        "padreId": { "type": "string" },
+        "madreId": { "type": "string" },
+        "pedigreeDocUrl": { "type": "string" },
+        "pedigreeDocNombre": { "type": "string" },
+        "pedigreeDocTipo": { "type": "string", "enum": ["PDF", "IMAGE"] },
+        "pedigreeDocFecha": { "type": "string" },
+        "pedigreeDocSize": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "criaderoId", "nombreCompleto", "sexo"]
+    },
+    "Camada": {
+      "title": "Camada",
+      "description": "Camada de cachorros registrada",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "criaderoId": { "type": "string" },
+        "identificador": { "type": "string" },
+        "padreId": { "type": "string" },
+        "madreId": { "type": "string" },
+        "estado": { "type": "string" },
+        "totalCachorros": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "criaderoId", "identificador"]
+    },
+    "Cachorro": {
+      "title": "Cachorro",
+      "description": "Cachorro individual de una camada",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "criaderoId": { "type": "string" },
+        "camadaId": { "type": "string" },
+        "identificadorProvisorio": { "type": "string" },
+        "sexo": { "type": "string", "enum": ["MACHO", "HEMBRA"] },
+        "estadoComercial": { "type": "string" },
+        "solicitudPedigreeDocUrl": { "type": "string" },
+        "solicitudPedigreeDocNombre": { "type": "string" },
+        "solicitudPedigreeDocFecha": { "type": "string" },
+        "solicitudPedigreeDocSize": { "type": "string" }
+      },
+      "required": ["id", "criaderoId", "camadaId"]
+    },
+    "ChatConversation": {
+      "title": "ChatConversation",
+      "description": "Conversación 1 a 1 entre criadores registrados",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "participantCriaderoIds": { "type": "array", "items": { "type": "string" } },
+        "participantUids": { "type": "array", "items": { "type": "string" } },
+        "lastMessageText": { "type": "string" },
+        "lastMessageTimestamp": { "type": "string" },
+        "lastMessageSenderUid": { "type": "string" },
+        "lastMessageSenderCriaderoId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "participantCriaderoIds", "participantUids"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Mensaje en tiempo real de una conversación",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "chatId": { "type": "string" },
+        "senderUid": { "type": "string" },
+        "senderCriaderoId": { "type": "string" },
+        "senderNombre": { "type": "string" },
+        "receiverCriaderoId": { "type": "string" },
+        "texto": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "leido": { "type": "boolean" }
+      },
+      "required": ["id", "chatId", "senderUid", "senderCriaderoId", "texto", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/criaderos/{criaderoId}": {
+      "schema": "Criadero",
+      "description": "Datos de los criaderos"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Perfiles y roles de usuarios"
+    },
+    "/ejemplares/{ejemplarId}": {
+      "schema": "Ejemplar",
+      "description": "Ejemplares del criadero"
+    },
+    "/camadas/{camadaId}": {
+      "schema": "Camada",
+      "description": "Camadas nacidas o planificadas"
+    },
+    "/cachorros/{cachorroId}": {
+      "schema": "Cachorro",
+      "description": "Cachorros individuales"
+    },
+    "/chats/{chatId}": {
+      "schema": "ChatConversation",
+      "description": "Conversaciones 1 a 1 entre criaderos"
+    },
+    "/chats/{chatId}/messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Mensajes individuales del chat"
+    }
+  }
+}
+

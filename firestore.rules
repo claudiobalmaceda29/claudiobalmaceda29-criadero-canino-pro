@@ -1,0 +1,212 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Healthcheck and connection ping
+    match /test/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // --- Helper Functions ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'claudiobalmaceda.ok@gmail.com' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.rol == 'SUPER_ADMIN')
+      );
+    }
+
+    function isUserSelf(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function getUserCriaderoId() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.criaderoId;
+    }
+
+    function canAccessCriadero(criaderoId) {
+      return isSignedIn() && (
+        isSuperAdmin() ||
+        request.auth.uid == criaderoId ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         getUserCriaderoId() == criaderoId)
+      );
+    }
+
+    // --- Collections Security ---
+
+    // Users collection: users can read/write their own record; SuperAdmin has full access
+    match /users/{userId} {
+      allow get: if isSignedIn() && (isUserSelf(userId) || isSuperAdmin());
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && (isUserSelf(userId) || isSuperAdmin());
+      allow update: if isSignedIn() && (isUserSelf(userId) || isSuperAdmin());
+      allow delete: if isSuperAdmin();
+    }
+
+    match /usuarios/{userId} {
+      allow get: if isSignedIn() && (isUserSelf(userId) || isSuperAdmin());
+      allow list: if isSignedIn();
+      allow create, update: if isSignedIn() && (isUserSelf(userId) || isSuperAdmin());
+      allow delete: if isSuperAdmin();
+    }
+
+    // Criaderos: each breeder accesses strictly their own criadero
+    match /criaderos/{criaderoId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if canAccessCriadero(criaderoId);
+      allow delete: if isSuperAdmin();
+    }
+
+    // Ejemplares: strictly scoped to the breeder's criadero
+    match /ejemplares/{ejemplarId} {
+      allow get: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(request.resource.data.criaderoId));
+      allow update: if isSignedIn() && (isSuperAdmin() || (canAccessCriadero(resource.data.criaderoId) && canAccessCriadero(request.resource.data.criaderoId)));
+      allow delete: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+    }
+
+    // Camadas: strictly scoped to the breeder's criadero
+    match /camadas/{camadaId} {
+      allow get: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(request.resource.data.criaderoId));
+      allow update: if isSignedIn() && (isSuperAdmin() || (canAccessCriadero(resource.data.criaderoId) && canAccessCriadero(request.resource.data.criaderoId)));
+      allow delete: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+    }
+
+    // Cachorros: strictly scoped to the breeder's criadero
+    match /cachorros/{cachorroId} {
+      allow get: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(request.resource.data.criaderoId));
+      allow update: if isSignedIn() && (isSuperAdmin() || (canAccessCriadero(resource.data.criaderoId) && canAccessCriadero(request.resource.data.criaderoId)));
+      allow delete: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+    }
+
+    // Registros Sanitarios
+    match /registrosSanitarios/{registroId} {
+      allow get: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(request.resource.data.criaderoId));
+      allow update: if isSignedIn() && (isSuperAdmin() || (canAccessCriadero(resource.data.criaderoId) && canAccessCriadero(request.resource.data.criaderoId)));
+      allow delete: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+    }
+
+    // Montas
+    match /montas/{montaId} {
+      allow get: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(request.resource.data.criaderoId));
+      allow update: if isSignedIn() && (isSuperAdmin() || (canAccessCriadero(resource.data.criaderoId) && canAccessCriadero(request.resource.data.criaderoId)));
+      allow delete: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+    }
+
+    // Ciclos Celo
+    match /ciclosCelo/{cicloId} {
+      allow get: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(request.resource.data.criaderoId));
+      allow update: if isSignedIn() && (isSuperAdmin() || (canAccessCriadero(resource.data.criaderoId) && canAccessCriadero(request.resource.data.criaderoId)));
+      allow delete: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+    }
+
+    // Gestaciones
+    match /gestaciones/{gestacionId} {
+      allow get: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(request.resource.data.criaderoId));
+      allow update: if isSignedIn() && (isSuperAdmin() || (canAccessCriadero(resource.data.criaderoId) && canAccessCriadero(request.resource.data.criaderoId)));
+      allow delete: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+    }
+
+    // Simulaciones de Cruza
+    match /simulacionesCruza/{simId} {
+      allow get: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(request.resource.data.criaderoId));
+      allow update: if isSignedIn() && (isSuperAdmin() || (canAccessCriadero(resource.data.criaderoId) && canAccessCriadero(request.resource.data.criaderoId)));
+      allow delete: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+    }
+
+    // Exposiciones POA
+    match /exposiciones/{expoId} {
+      allow get: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(request.resource.data.criaderoId));
+      allow update: if isSignedIn() && (isSuperAdmin() || (canAccessCriadero(resource.data.criaderoId) && canAccessCriadero(request.resource.data.criaderoId)));
+      allow delete: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+    }
+
+    // Transacciones Económicas
+    match /transacciones/{transId} {
+      allow get: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(request.resource.data.criaderoId));
+      allow update: if isSignedIn() && (isSuperAdmin() || (canAccessCriadero(resource.data.criaderoId) && canAccessCriadero(request.resource.data.criaderoId)));
+      allow delete: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+    }
+
+    // Auditoría
+    match /auditoria/{logId} {
+      allow get: if isSignedIn() && isSuperAdmin();
+      allow list: if isSignedIn() && isSuperAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if isSuperAdmin();
+    }
+
+    // Chats entre Criadores (1 a 1 en tiempo real)
+    match /chats/{chatId} {
+      allow get: if isSignedIn() && (
+        isSuperAdmin() ||
+        resource.data.participantCriaderoIds.hasAny([getUserCriaderoId()]) ||
+        resource.data.participantUids.hasAny([request.auth.uid])
+      );
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && (
+        isSuperAdmin() ||
+        request.resource.data.participantCriaderoIds.hasAny([getUserCriaderoId()]) ||
+        request.resource.data.participantUids.hasAny([request.auth.uid])
+      );
+      allow update: if isSignedIn() && (
+        isSuperAdmin() ||
+        resource.data.participantCriaderoIds.hasAny([getUserCriaderoId()]) ||
+        resource.data.participantUids.hasAny([request.auth.uid])
+      );
+      allow delete: if isSuperAdmin();
+
+      // Mensajes individuales dentro de la conversación
+      match /messages/{messageId} {
+        allow get, list: if isSignedIn() && (
+          isSuperAdmin() ||
+          get(/databases/$(database)/documents/chats/$(chatId)).data.participantCriaderoIds.hasAny([getUserCriaderoId()]) ||
+          get(/databases/$(database)/documents/chats/$(chatId)).data.participantUids.hasAny([request.auth.uid])
+        );
+        allow create: if isSignedIn() && (
+          isSuperAdmin() ||
+          request.resource.data.senderCriaderoId == getUserCriaderoId() ||
+          request.resource.data.senderUid == request.auth.uid
+        );
+        allow update: if isSignedIn() && (
+          isSuperAdmin() ||
+          get(/databases/$(database)/documents/chats/$(chatId)).data.participantCriaderoIds.hasAny([getUserCriaderoId()]) ||
+          get(/databases/$(database)/documents/chats/$(chatId)).data.participantUids.hasAny([request.auth.uid])
+        );
+        allow delete: if isSuperAdmin();
+      }
+    }
+  }
+}
+
