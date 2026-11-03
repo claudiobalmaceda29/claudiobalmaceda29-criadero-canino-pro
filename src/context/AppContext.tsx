@@ -57,6 +57,7 @@ import {
   collection,
   doc,
   setDoc,
+  updateDoc,
   deleteDoc,
   onSnapshot,
   query,
@@ -134,12 +135,14 @@ interface AppContextType {
   // Mutators
   addEjemplar: (e: Omit<Ejemplar, 'id' | 'createdAt'> & { id?: string }) => Promise<Ejemplar>;
   updateEjemplar: (id: string, e: Partial<Ejemplar>) => Promise<void>;
-  deleteEjemplar: (id: string) => void;
+  deleteEjemplar: (id: string, motivo?: string) => Promise<boolean>;
+  retirarEjemplar: (id: string, motivo?: string) => Promise<boolean>;
+  reactivarEjemplar: (id: string) => Promise<boolean>;
 
-  addRegistroSanitario: (r: Omit<RegistroSanitario, 'id'>) => void;
+  addRegistroSanitario: (r: Omit<RegistroSanitario, 'id'>) => Promise<RegistroSanitario> | void;
   deleteRegistroSanitario: (id: string) => void;
 
-  addMonta: (m: Omit<Monta, 'id'>) => Monta;
+  addMonta: (m: Omit<Monta, 'id'>) => Promise<Monta> | Monta;
   updateMonta: (id: string, m: Partial<Monta>) => void;
   deleteMonta: (id: string) => void;
 
@@ -158,10 +161,10 @@ interface AppContextType {
   deleteCamada: (id: string) => void;
 
   addCachorro: (c: Omit<Cachorro, 'id'>) => Cachorro;
-  updateCachorro: (id: string, c: Partial<Cachorro>) => void;
+  updateCachorro: (id: string, c: Partial<Cachorro>) => Promise<void> | void;
   deleteCachorro: (id: string) => void;
   addPesajeCachorro: (cachorroId: string, pesaje: PesajeCachorro) => void;
-  incorporarCachorroAPlantel: (cachorroId: string) => Ejemplar | null;
+  incorporarCachorroAPlantel: (cachorroId: string) => Promise<Ejemplar | null> | (Ejemplar | null);
 
   addSimulacionCruza: (s: Omit<SimulacionCruza, 'id'>) => void;
   deleteSimulacionCruza: (id: string) => void;
@@ -205,6 +208,8 @@ interface AppContextType {
   // Global search modal trigger
   isSearchOpen: boolean;
   setIsSearchOpen: (open: boolean) => void;
+  globalSearchQuery: string;
+  setGlobalSearchQuery: (query: string) => void;
 
   // Print modal trigger
   printModalData: {
@@ -451,6 +456,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Search modal state
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [globalSearchQuery, setGlobalSearchQuery] = useState('');
 
   // Print modal state
   const [printModalData, setPrintModalData] = useState<{
@@ -954,7 +960,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         qRegistros,
         (snap) => {
           const list: RegistroSanitario[] = [];
-          snap.forEach((d) => list.push(d.data() as RegistroSanitario));
+          snap.forEach((d) => list.push({ id: d.id, ...(d.data() as any) } as RegistroSanitario));
           setRegistrosSanitarios(list);
         },
         (error) => handleFirestoreError(error, OperationType.LIST, 'registrosSanitarios')
@@ -1587,9 +1593,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     (resourceCriaderoId?: string): boolean => {
       if (isSuperAdminUser) return true;
       if (!resourceCriaderoId) return true;
-      return resourceCriaderoId === currentCriaderoId;
+      if (resourceCriaderoId === currentCriaderoId) return true;
+      if (currentUser?.id && resourceCriaderoId === currentUser.id) return true;
+      if ((currentUser as any)?.uid && resourceCriaderoId === (currentUser as any).uid) return true;
+      if (firebaseUser?.uid && resourceCriaderoId === firebaseUser.uid) return true;
+      if (auth.currentUser?.uid && resourceCriaderoId === auth.currentUser.uid) return true;
+      return false;
     },
-    [isSuperAdminUser, currentCriaderoId]
+    [isSuperAdminUser, currentCriaderoId, currentUser, firebaseUser]
   );
 
   // Mutators for Ejemplares
@@ -1678,76 +1689,248 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const deleteEjemplar = (id: string) => {
+  // Borrado Lógico (Soft Delete) de Ejemplares
+  const retirarEjemplar = async (id: string, motivo?: string): Promise<boolean> => {
     const existing = ejemplares.find((d) => d.id === id);
-    if (existing && !canManageCriaderoResource(existing.criaderoId)) {
-      console.warn('Seguridad: Un criador no puede eliminar datos de otro criadero.');
-      return;
+    if (!existing) return false;
+
+    const fechaRetiro = new Date().toISOString().split('T')[0];
+    const softDeleteUpdates: Partial<Ejemplar> = {
+      estado: 'RETIRADO',
+      activoEnPlantel: false,
+      estadoReproductivo: 'RETIRADO',
+      fechaRetiro,
+      motivoRetiro: motivo || 'Retirado del plantel activo (Borrado Lógico)',
+    };
+
+    // 1. Actualización inmediata en el estado de React (se conserva el registro pero retirado)
+    setEjemplares((prev) =>
+      prev.map((dog) => (dog.id === id ? { ...dog, ...softDeleteUpdates } : dog))
+    );
+
+    // 2. Actualización en localStorage para persistencia offline inmediata
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed.ejemplares)) {
+          parsed.ejemplares = parsed.ejemplares.map((e: any) =>
+            e.id === id ? { ...e, ...softDeleteUpdates } : e
+          );
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        }
+      }
+    } catch (e) {
+      console.warn('LocalStorage soft delete error:', e);
     }
-    setEjemplares((prev) => prev.filter((dog) => dog.id !== id));
-    if (firebaseUser) {
-      deleteDoc(doc(db, 'ejemplares', id)).catch((err) =>
-        handleFirestoreError(err, OperationType.DELETE, 'ejemplares')
-      );
+
+    // 3. Borrado lógico (updateDoc) en Cloud Firestore - NO deleteDoc
+    try {
+      const cleanUpdates = cleanForFirestore(softDeleteUpdates);
+      await updateDoc(doc(db, 'ejemplares', id), cleanUpdates);
+      return true;
+    } catch (err: any) {
+      // Fallback con setDoc merge si updateDoc detecta desajuste
+      try {
+        await setDoc(doc(db, 'ejemplares', id), cleanForFirestore({ ...existing, ...softDeleteUpdates }), { merge: true });
+        return true;
+      } catch (innerErr) {
+        console.error('Error al realizar borrado lógico (updateDoc) en Firestore:', innerErr);
+        handleFirestoreError(innerErr, OperationType.UPDATE, 'ejemplares');
+        return false;
+      }
+    }
+  };
+
+  const deleteEjemplar = async (id: string, motivo?: string): Promise<boolean> => {
+    return retirarEjemplar(id, motivo);
+  };
+
+  const reactivarEjemplar = async (id: string): Promise<boolean> => {
+    const existing = ejemplares.find((d) => d.id === id);
+    if (!existing) return false;
+
+    const reactivateUpdates: Partial<Ejemplar> = {
+      estado: 'ACTIVO',
+      activoEnPlantel: true,
+      estadoReproductivo: 'ACTIVO',
+    };
+
+    setEjemplares((prev) =>
+      prev.map((dog) => (dog.id === id ? { ...dog, ...reactivateUpdates } : dog))
+    );
+
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed.ejemplares)) {
+          parsed.ejemplares = parsed.ejemplares.map((e: any) =>
+            e.id === id ? { ...e, ...reactivateUpdates } : e
+          );
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        }
+      }
+    } catch (e) {
+      console.warn('LocalStorage reactivate error:', e);
+    }
+
+    try {
+      const cleanUpdates = cleanForFirestore(reactivateUpdates);
+      await updateDoc(doc(db, 'ejemplares', id), cleanUpdates);
+      return true;
+    } catch (err: any) {
+      try {
+        await setDoc(doc(db, 'ejemplares', id), cleanForFirestore({ ...existing, ...reactivateUpdates }), { merge: true });
+        return true;
+      } catch (innerErr) {
+        console.error('Error al reactivar ejemplar en Firestore:', innerErr);
+        handleFirestoreError(innerErr, OperationType.UPDATE, 'ejemplares');
+        return false;
+      }
     }
   };
 
   // Sanidad
-  const addRegistroSanitario = (data: Omit<RegistroSanitario, 'id'>) => {
+  const addRegistroSanitario = async (data: Omit<RegistroSanitario, 'id'>): Promise<RegistroSanitario> => {
     const reg: RegistroSanitario = {
       ...data,
       id: `san-${Date.now()}`,
       criaderoId: data.criaderoId || currentCriaderoId,
     };
-    setRegistrosSanitarios((prev) => [reg, ...prev]);
-    if (firebaseUser) {
-      setDoc(doc(db, 'registrosSanitarios', reg.id), reg).catch((err) =>
-        handleFirestoreError(err, OperationType.CREATE, 'registrosSanitarios')
-      );
+    const cleanPayload = cleanForFirestore(reg) as RegistroSanitario;
+    setRegistrosSanitarios((prev) => [cleanPayload, ...prev]);
+
+    // LocalStorage immediate synchronization
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed.registrosSanitarios)) {
+          parsed.registrosSanitarios = [
+            cleanPayload,
+            ...parsed.registrosSanitarios.filter((r: any) => r.id !== cleanPayload.id),
+          ];
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        }
+      }
+    } catch (e) {
+      console.warn('LocalStorage save error for registroSanitario:', e);
     }
+
+    if (firebaseUser) {
+      try {
+        await setDoc(doc(db, 'registrosSanitarios', cleanPayload.id), cleanPayload, { merge: true });
+      } catch (err: any) {
+        console.error('Error guardando registro sanitario en Firestore:', err);
+        handleFirestoreError(err, OperationType.CREATE, 'registrosSanitarios');
+      }
+    }
+
+    return cleanPayload;
   };
 
-  const deleteRegistroSanitario = (id: string) => {
+  const deleteRegistroSanitario = async (id: string): Promise<void> => {
     const existing = registrosSanitarios.find((r) => r.id === id);
     if (existing && !canManageCriaderoResource(existing.criaderoId)) {
       console.warn('Seguridad: Un criador no puede eliminar datos de otro criadero.');
       return;
     }
     setRegistrosSanitarios((prev) => prev.filter((r) => r.id !== id));
+
+    // LocalStorage sync
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed.registrosSanitarios)) {
+          parsed.registrosSanitarios = parsed.registrosSanitarios.filter((r: any) => r.id !== id);
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        }
+      }
+    } catch (e) {
+      console.warn('LocalStorage error deleting registroSanitario:', e);
+    }
+
     if (firebaseUser) {
-      deleteDoc(doc(db, 'registrosSanitarios', id)).catch((err) =>
-        handleFirestoreError(err, OperationType.DELETE, 'registrosSanitarios')
-      );
+      try {
+        await deleteDoc(doc(db, 'registrosSanitarios', id));
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.DELETE, 'registrosSanitarios');
+      }
     }
   };
 
   // Montas
-  const addMonta = (data: Omit<Monta, 'id'>): Monta => {
+  const addMonta = async (data: Omit<Monta, 'id'>): Promise<Monta> => {
     const m: Monta = {
       ...data,
       id: `monta-${Date.now()}`,
       criaderoId: data.criaderoId || currentCriaderoId,
     };
     setMontas((prev) => [m, ...prev]);
+
+    // Local storage immediate cache update
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed.montas)) {
+          parsed.montas = [m, ...parsed.montas.filter((item: any) => item.id !== m.id)];
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        }
+      }
+    } catch (e) {
+      console.warn('LocalStorage save error for monta:', e);
+    }
+
     if (firebaseUser) {
-      setDoc(doc(db, 'montas', m.id), m).catch((err) =>
-        handleFirestoreError(err, OperationType.CREATE, 'montas')
-      );
+      try {
+        const firestorePayload = cleanForFirestore(m);
+        await setDoc(doc(db, 'montas', m.id), firestorePayload, { merge: true });
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.CREATE, 'montas');
+      }
     }
     return m;
   };
 
-  const updateMonta = (id: string, updates: Partial<Monta>) => {
+  const updateMonta = async (id: string, updates: Partial<Monta>): Promise<boolean> => {
     const existing = montas.find((m) => m.id === id);
     if (existing && !canManageCriaderoResource(existing.criaderoId)) {
       console.warn('Seguridad: Un criador no puede modificar datos de otro criadero.');
-      return;
+      return false;
     }
-    setMontas((prev) => prev.map((m) => (m.id === id ? { ...m, ...updates } : m)));
-    if (firebaseUser) {
-      setDoc(doc(db, 'montas', id), updates, { merge: true }).catch((err) =>
-        handleFirestoreError(err, OperationType.UPDATE, 'montas')
-      );
+    const cleanUpdates = cleanForFirestore(updates);
+    setMontas((prev) => prev.map((m) => (m.id === id ? { ...m, ...cleanUpdates } : m)));
+
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed.montas)) {
+          parsed.montas = parsed.montas.map((m: any) =>
+            m.id === id ? { ...m, ...cleanUpdates } : m
+          );
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        }
+      }
+    } catch (e) {
+      console.warn('LocalStorage save error in updateMonta:', e);
+    }
+
+    try {
+      await updateDoc(doc(db, 'montas', id), cleanUpdates);
+      return true;
+    } catch (err: any) {
+      try {
+        await setDoc(doc(db, 'montas', id), cleanUpdates, { merge: true });
+        return true;
+      } catch (innerErr) {
+        console.error('Error al actualizar monta en Firestore:', innerErr);
+        handleFirestoreError(innerErr, OperationType.UPDATE, 'montas');
+        return false;
+      }
     }
   };
 
@@ -1890,8 +2073,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString(),
     };
     setCamadas((prev) => [c, ...prev]);
+
+    // Immediate localStorage sync
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed.camadas)) {
+          parsed.camadas = [c, ...parsed.camadas.filter((item: any) => item.id !== c.id)];
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        }
+      }
+    } catch {}
+
     if (firebaseUser) {
-      setDoc(doc(db, 'camadas', c.id), c).catch((err) =>
+      setDoc(doc(db, 'camadas', c.id), cleanForFirestore(c), { merge: true }).catch((err) =>
         handleFirestoreError(err, OperationType.CREATE, 'camadas')
       );
     }
@@ -1904,9 +2100,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.warn('Seguridad: Un criador no puede modificar datos de otro criadero.');
       return;
     }
-    setCamadas((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)));
+    const cleanUpdates = cleanForFirestore(updates);
+    setCamadas((prev) => prev.map((c) => (c.id === id ? { ...c, ...cleanUpdates } : c)));
+
+    // Immediate localStorage sync
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed.camadas)) {
+          parsed.camadas = parsed.camadas.map((item: any) =>
+            item.id === id ? { ...item, ...cleanUpdates } : item
+          );
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        }
+      }
+    } catch {}
+
     if (firebaseUser) {
-      setDoc(doc(db, 'camadas', id), updates, { merge: true }).catch((err) =>
+      setDoc(doc(db, 'camadas', id), cleanUpdates, { merge: true }).catch((err) =>
         handleFirestoreError(err, OperationType.UPDATE, 'camadas')
       );
     }
@@ -1935,24 +2147,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setCachorros((prev) => [p, ...prev]);
     if (firebaseUser) {
-      setDoc(doc(db, 'cachorros', p.id), p).catch((err) =>
+      setDoc(doc(db, 'cachorros', p.id), cleanForFirestore(p)).catch((err) =>
         handleFirestoreError(err, OperationType.CREATE, 'cachorros')
       );
     }
     return p;
   };
 
-  const updateCachorro = (id: string, updates: Partial<Cachorro>) => {
+  const updateCachorro = async (id: string, updates: Partial<Cachorro>): Promise<void> => {
     const existing = cachorros.find((c) => c.id === id);
     if (existing && !canManageCriaderoResource(existing.criaderoId)) {
       console.warn('Seguridad: Un criador no puede modificar datos de otro criadero.');
       return;
     }
-    setCachorros((prev) => prev.map((p) => (p.id === id ? { ...p, ...updates } : p)));
+    const cleanUpdates = cleanForFirestore(updates);
+    setCachorros((prev) => prev.map((p) => (p.id === id ? { ...p, ...cleanUpdates } : p)));
+
+    // Immediate localStorage sync so changes persist across page reloads (F5)
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed.cachorros)) {
+          parsed.cachorros = parsed.cachorros.map((item: any) =>
+            item.id === id ? { ...item, ...cleanUpdates } : item
+          );
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        }
+      }
+    } catch (e) {
+      console.warn('LocalStorage save error for cachorro:', e);
+    }
+
     if (firebaseUser) {
-      setDoc(doc(db, 'cachorros', id), updates, { merge: true }).catch((err) =>
-        handleFirestoreError(err, OperationType.UPDATE, 'cachorros')
-      );
+      try {
+        await setDoc(doc(db, 'cachorros', id), cleanUpdates, { merge: true });
+      } catch (err: any) {
+        console.error('Error actualizando cachorro en Firestore:', err);
+        handleFirestoreError(err, OperationType.UPDATE, 'cachorros');
+        throw err;
+      }
     }
   };
 
@@ -1982,13 +2216,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     );
   };
 
-  const incorporarCachorroAPlantel = (cachorroId: string): Ejemplar | null => {
+  const incorporarCachorroAPlantel = async (cachorroId: string): Promise<Ejemplar | null> => {
     const cachorro = cachorros.find((c) => c.id === cachorroId);
     if (!cachorro) return null;
 
+    const fatherDog = ejemplares.find(
+      (e) => (cachorro.padreId && e.id === cachorro.padreId) || (cachorro.padreNombre && e.nombreCompleto === cachorro.padreNombre)
+    );
+    const motherDog = ejemplares.find(
+      (e) => (cachorro.madreId && e.id === cachorro.madreId) || (cachorro.madreNombre && e.nombreCompleto === cachorro.madreNombre)
+    );
+
     const nuevoEjemplar: Ejemplar = {
       id: `ejem-${Date.now()}`,
-      criaderoId: cachorro.criaderoId,
+      criaderoId: cachorro.criaderoId || currentCriaderoId,
       nombreCompleto: cachorro.nombre || `${cachorro.identificadorProvisorio} (Incorporado)`,
       afijo: currentCriadero?.afijo || '',
       sexo: cachorro.sexo,
@@ -1996,12 +2237,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       fechaNacimiento: cachorro.fechaNacimiento || new Date().toISOString().split('T')[0],
       numeroPOA: cachorro.numeroPOA || 'En trámite',
       microchip: cachorro.microchip || '',
-      tatuaje: '',
+      tatuaje: cachorro.tatuaje || '',
       identificacionInterna: `PROVENIENTE_CACHORRO_${cachorro.id}`,
       color: cachorro.color || 'Negro y Fuego',
-      pelo: 'CORTO',
+      pelo: (cachorro.pelo as any) || 'CORTO',
       estadoReproductivo: 'ACTIVO',
       estado: 'ACTIVO',
+      esDelPlantel: true,
+      esExterno: false,
       fotoUrl:
         cachorro.fotoUrl ||
         'https://images.unsplash.com/photo-1589941013453-ec89f33b5455?auto=format&fit=crop&w=800&q=80',
@@ -2009,23 +2252,63 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       padreNombre: cachorro.padreNombre,
       madreId: cachorro.madreId,
       madreNombre: cachorro.madreNombre,
+      abueloPaterno: fatherDog?.padreNombre || '',
+      abuelaPaterna: fatherDog?.madreNombre || '',
+      abueloMaterno: motherDog?.padreNombre || '',
+      abuelaMaterna: motherDog?.madreNombre || '',
+      bisabuelos: {
+        ...(fatherDog?.bisabuelos || {}),
+        ...(motherDog?.bisabuelos || {}),
+      },
       titulos: [],
       calificacionCria: 'Apto Cría Preliminar',
       displasiaCadera: 'No Evaluado',
       displasiaCodo: 'No Evaluado',
       adn: 'EN_TRAMITE',
-      observaciones: `Incorporado desde Camada ${cachorro.camadaNombre}. ID Cachorro: ${cachorro.id}`,
+      observaciones: `Incorporado al plantel oficial desde Camada ${cachorro.camadaNombre || 'S/N'}. ID Cachorro: ${cachorro.id}`,
       createdAt: new Date().toISOString(),
     };
 
-    setEjemplares((prev) => [nuevoEjemplar, ...prev]);
-    updateCachorro(cachorroId, {
+    const cleanEjemplar = cleanForFirestore(nuevoEjemplar) as Ejemplar;
+
+    // Update state
+    setEjemplares((prev) => [cleanEjemplar, ...prev]);
+
+    // Immediate localStorage sync
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed.ejemplares)) {
+          parsed.ejemplares = [
+            cleanEjemplar,
+            ...parsed.ejemplares.filter((e: any) => e.id !== cleanEjemplar.id),
+          ];
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        }
+      }
+    } catch (e) {
+      console.warn('LocalStorage save error for incorporado ejemplar:', e);
+    }
+
+    // Persist in Firestore
+    if (firebaseUser) {
+      try {
+        await setDoc(doc(db, 'ejemplares', cleanEjemplar.id), cleanEjemplar, { merge: true });
+      } catch (err: any) {
+        console.error('Error guardando nuevo ejemplar incorporado en Firestore:', err);
+        handleFirestoreError(err, OperationType.CREATE, 'ejemplares');
+      }
+    }
+
+    // Update cachorro state and Firestore
+    await updateCachorro(cachorroId, {
       estadoComercial: 'PLANTEL',
       incorporadoAlPlantel: true,
-      ejemplarAdultoId: nuevoEjemplar.id,
+      ejemplarAdultoId: cleanEjemplar.id,
     });
 
-    return nuevoEjemplar;
+    return cleanEjemplar;
   };
 
   // Simulaciones
@@ -2425,6 +2708,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addEjemplar,
         updateEjemplar,
         deleteEjemplar,
+        retirarEjemplar,
+        reactivarEjemplar,
         addRegistroSanitario,
         deleteRegistroSanitario,
         addMonta,
@@ -2469,6 +2754,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         marcarTodasNotificacionesLeidas,
         isSearchOpen,
         setIsSearchOpen,
+        globalSearchQuery,
+        setGlobalSearchQuery,
         printModalData,
         openPrintModal,
         closePrintModal,

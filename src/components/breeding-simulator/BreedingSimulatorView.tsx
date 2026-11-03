@@ -22,6 +22,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { SimulacionCruza } from '../../types';
+import { GeneticAiReportModal, GeneticReportData } from './GeneticAiReportModal';
 
 export const BreedingSimulatorView: React.FC = () => {
   const {
@@ -57,6 +58,12 @@ export const BreedingSimulatorView: React.FC = () => {
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [serverCOI, setServerCOI] = useState<any>(null);
   const [isCalculatingServer, setIsCalculatingServer] = useState(false);
+
+  // AI Genetic Analysis States
+  const [isGeneratingAiReport, setIsGeneratingAiReport] = useState(false);
+  const [aiReportData, setAiReportData] = useState<GeneticReportData | null>(null);
+  const [aiReportSource, setAiReportSource] = useState<string | undefined>(undefined);
+  const [aiReportError, setAiReportError] = useState<string | null>(null);
 
   // Fetch functions for PedigreeDatabase links
   const handleFetchMachoPdb = async (customUrl?: string) => {
@@ -359,6 +366,51 @@ export const BreedingSimulatorView: React.FC = () => {
     setSavedSuccess(true);
     setSimulationNotes('');
     setTimeout(() => setSavedSuccess(false), 2500);
+  };
+
+  const handleGenerateAiAnalysis = async () => {
+    if (!selectedMacho || !selectedHembra) {
+      alert('Por favor selecciona un macho y una hembra para generar el análisis.');
+      return;
+    }
+
+    try {
+      setIsGeneratingAiReport(true);
+      setAiReportError(null);
+
+      const payload = {
+        macho: {
+          ...selectedMacho,
+          titulos: (selectedMacho as any).titulos || [],
+        },
+        hembra: {
+          ...selectedHembra,
+          titulos: (selectedHembra as any).titulos || [],
+        },
+        coi: serverCOI?.coiPercentage ?? analysis?.coefficient ?? 0,
+        commonAncestors: serverCOI?.commonAncestors || analysis?.sharedList || [],
+      };
+
+      const res = await fetch('/api/genetic-analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Error al generar el análisis genético con IA');
+      }
+
+      setAiReportData(json.data);
+      setAiReportSource(json.source);
+    } catch (err: any) {
+      console.error('Error generando análisis genético:', err);
+      setAiReportError(err.message || 'Error al generar el análisis genético');
+      alert('Error al generar el análisis genético: ' + (err.message || 'Intente nuevamente'));
+    } finally {
+      setIsGeneratingAiReport(false);
+    }
   };
 
   return (
@@ -874,6 +926,47 @@ export const BreedingSimulatorView: React.FC = () => {
               </div>
             </div>
 
+            {/* AI Genetic Analysis CTA Banner */}
+            <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-indigo-900 via-purple-900 to-slate-900 text-white flex flex-col sm:flex-row items-center justify-between gap-4 shadow-md border border-indigo-700/50">
+              <div className="flex items-center gap-3.5">
+                <div className="p-3 rounded-2xl bg-white/10 text-amber-300 border border-white/20 shrink-0">
+                  <Sparkles className="w-6 h-6 animate-pulse" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-black text-sm sm:text-base text-white">
+                      Análisis Genético Inteligente de Cruza
+                    </h4>
+                    <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-purple-500/30 text-purple-200 border border-purple-400/30">
+                      IA POA
+                    </span>
+                  </div>
+                  <p className="text-xs text-indigo-200/90 mt-0.5 max-w-xl">
+                    Genera un reporte cinológico completo de 5 secciones: linebreeding, fortalezas fenotípicas, riesgos a vigilar, cachorro ideal y dictamen experto.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleGenerateAiAnalysis}
+                disabled={isGeneratingAiReport}
+                className="w-full sm:w-auto px-5 py-3 rounded-xl bg-gradient-to-r from-pink-500 via-purple-600 to-indigo-600 hover:from-pink-600 hover:via-purple-700 hover:to-indigo-700 text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg transition-all hover:scale-105 cursor-pointer disabled:opacity-50 shrink-0"
+              >
+                {isGeneratingAiReport ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>Analizando Genética...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 text-amber-300" />
+                    <span>Generar Análisis de Cruza con IA</span>
+                  </>
+                )}
+              </button>
+            </div>
+
             {/* Ancestors in common & Genetics */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
               {/* Shared Ancestors */}
@@ -971,13 +1064,25 @@ export const BreedingSimulatorView: React.FC = () => {
                 <div className="text-[10px] text-slate-500 dark:text-slate-400 italic">
                   * Las simulaciones son hipotéticas y se mantienen diferenciadas de las montas reales.
                 </div>
-                <button
-                  onClick={handleSaveSimulation}
-                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer"
-                >
-                  <Save className="w-4 h-4" />
-                  <span>{savedSuccess ? '¡Simulación Guardada!' : 'Guardar Simulación'}</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleGenerateAiAnalysis}
+                    disabled={isGeneratingAiReport}
+                    className="px-4 py-2.5 rounded-xl bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/60 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                    title="Generar análisis zootécnico con IA"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                    <span>Análisis con IA</span>
+                  </button>
+                  <button
+                    onClick={handleSaveSimulation}
+                    className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>{savedSuccess ? '¡Simulación Guardada!' : 'Guardar Simulación'}</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1057,6 +1162,15 @@ export const BreedingSimulatorView: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* AI Genetic Analysis Report Modal */}
+      {aiReportData && (
+        <GeneticAiReportModal
+          report={aiReportData}
+          source={aiReportSource}
+          onClose={() => setAiReportData(null)}
+        />
+      )}
     </div>
   );
 };

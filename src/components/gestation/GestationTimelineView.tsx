@@ -11,12 +11,14 @@ import {
   X,
   Sparkles,
 } from 'lucide-react';
+import { formatDateDMY } from '../../lib/dogUtils';
 
 export const GestationTimelineView: React.FC = () => {
   const {
     gestaciones,
     completarHitoGestacion,
     registrarPartoReal,
+    setActiveTab,
   } = useApp();
 
   const [selectedGestId, setSelectedGestId] = useState<string>(gestaciones[0]?.id || '');
@@ -24,6 +26,9 @@ export const GestationTimelineView: React.FC = () => {
 
   // Form for real birth registration
   const [identificadorCamada, setIdentificadorCamada] = useState('');
+  const [fechaNacimientoParto, setFechaNacimientoParto] = useState(
+    new Date().toISOString().split('T')[0]
+  );
   const [totalCachorros, setTotalCachorros] = useState<number>(7);
   const [machos, setMachos] = useState<number>(4);
   const [hembras, setHembras] = useState<number>(3);
@@ -46,7 +51,8 @@ export const GestationTimelineView: React.FC = () => {
 
   const handleOpenBirthModal = () => {
     if (!currentGest) return;
-    setIdentificadorCamada(`Camada de ${currentGest.hembraNombre.split(' ')[0]} 2026`);
+    setIdentificadorCamada(`Camada "${currentGest.hembraNombre.split(' ')[0]}" ${new Date().getFullYear()}`);
+    setFechaNacimientoParto(new Date().toISOString().split('T')[0]);
     setShowBirthModal(true);
   };
 
@@ -61,7 +67,8 @@ export const GestationTimelineView: React.FC = () => {
       padreNombre: currentGest.machoNombre,
       madreId: currentGest.hembraId,
       madreNombre: currentGest.hembraNombre,
-      fechaNacimiento: new Date().toISOString().split('T')[0],
+      fechaEstimadaParto: currentGest.fechaEstimadaParto,
+      fechaNacimiento: fechaNacimientoParto || new Date().toISOString().split('T')[0],
       totalCachorros,
       machos,
       hembras,
@@ -69,11 +76,15 @@ export const GestationTimelineView: React.FC = () => {
       fallecidos,
       tipoParto,
       estado: 'LACTANCIA',
-      observaciones: observacionesParto || 'Parto registrado desde el cronograma de gestación.',
+      observaciones:
+        observacionesParto ||
+        `Parto registrado desde el cronograma de gestación (Servicio: ${currentGest.hembraNombre} x ${currentGest.machoNombre}).`,
     };
 
     registrarPartoReal(currentGest.id, camadaData);
     setShowBirthModal(false);
+    alert(`¡Camada "${camadaData.identificador}" registrada con éxito! Redirigiendo a la sección de Camadas...`);
+    setActiveTab('camadas');
   };
 
   return (
@@ -99,9 +110,21 @@ export const GestationTimelineView: React.FC = () => {
           <button
             onClick={handleOpenBirthModal}
             className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-pink-600 via-rose-600 to-indigo-600 hover:from-pink-500 hover:to-indigo-500 text-white font-black text-xs flex items-center gap-2 shadow-sm transition-all hover:scale-[1.02] cursor-pointer"
+            title="Registrar Camada prellenando Padre, Madre y fecha estimada"
           >
             <Baby className="w-4 h-4 stroke-[2.5]" />
-            <span>Registrar Parto Real</span>
+            <span>Registrar Camada</span>
+          </button>
+        )}
+
+        {currentGest && currentGest.estado === 'PARTO_REGISTRADO' && (
+          <button
+            onClick={() => setActiveTab('camadas')}
+            className="px-4 py-2.5 rounded-2xl bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold text-xs flex items-center gap-2 hover:bg-emerald-100 transition-colors cursor-pointer"
+            title="Ver la camada registrada en la sección de Camadas"
+          >
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            <span>Ver Camada Registrada</span>
           </button>
         )}
       </div>
@@ -146,7 +169,7 @@ export const GestationTimelineView: React.FC = () => {
                     Parto Estimado
                   </div>
                   <div className="text-lg font-black text-amber-800 font-mono">
-                    {currentGest.fechaEstimadaParto}
+                    {formatDateDMY(currentGest.fechaEstimadaParto)}
                   </div>
                 </div>
                 <div className="p-4 rounded-2xl bg-pink-50 border border-pink-200 text-center shadow-xs">
@@ -163,7 +186,7 @@ export const GestationTimelineView: React.FC = () => {
             {/* 63-Day Visual Progress Bar */}
             <div className="space-y-2 pt-2">
               <div className="flex justify-between text-xs text-slate-500 font-medium">
-                <span>Día 1 (Monta: {currentGest.fechaMonta})</span>
+                <span>Día 1 (Monta: {formatDateDMY(currentGest.fechaMonta)})</span>
                 <span className="text-slate-900 font-black">
                   Día {diasTranscurridos} de 63 (Semana {semanaActual})
                 </span>
@@ -281,19 +304,59 @@ export const GestationTimelineView: React.FC = () => {
             </div>
 
             <p className="text-xs text-slate-500">
-              Registra el parto de <strong className="text-slate-800">{currentGest.hembraNombre}</strong> y crea la camada oficial con fecha de hoy.
+              Registra el parto y la camada oficial heredando los datos reproductivos del servicio de monta.
             </p>
 
+            {/* Ficha de datos prellenados de la cruza */}
+            <div className="p-3.5 rounded-2xl bg-pink-50/70 border border-pink-200 text-xs space-y-2">
+              <div className="flex items-center justify-between text-[11px] font-bold text-pink-900 uppercase tracking-wider">
+                <span>Datos Heredados de la Cruza</span>
+                <span className="px-2 py-0.5 rounded-full bg-pink-200 text-pink-800 font-mono text-[10px]">
+                  Autocompletado
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-[11px]">
+                <div>
+                  <span className="text-slate-500 block">Madre:</span>
+                  <strong className="text-pink-800 font-bold truncate block">{currentGest.hembraNombre}</strong>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Padre:</span>
+                  <strong className="text-blue-800 font-bold truncate block">{currentGest.machoNombre}</strong>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Fecha de Monta:</span>
+                  <span className="text-slate-800 font-mono font-medium">{currentGest.fechaMonta}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block">Fecha Estimada Parto (63d):</span>
+                  <span className="text-amber-800 font-mono font-bold">{currentGest.fechaEstimadaParto}</span>
+                </div>
+              </div>
+            </div>
+
             <form onSubmit={handleConfirmBirth} className="space-y-4 text-xs">
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">Nombre / Identificador de Camada</label>
-                <input
-                  type="text"
-                  value={identificadorCamada}
-                  onChange={(e) => setIdentificadorCamada(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-2xl bg-slate-50 border border-slate-200 text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
-                  required
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Nombre / Identificador de Camada *</label>
+                  <input
+                    type="text"
+                    value={identificadorCamada}
+                    onChange={(e) => setIdentificadorCamada(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-2xl bg-slate-50 border border-slate-200 text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">Fecha Real de Parto / Nacimiento *</label>
+                  <input
+                    type="date"
+                    value={fechaNacimientoParto}
+                    onChange={(e) => setFechaNacimientoParto(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-2xl bg-slate-50 border border-slate-200 text-slate-900 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                    required
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-4 gap-2">

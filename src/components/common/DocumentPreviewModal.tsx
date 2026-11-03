@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Download, ExternalLink, Printer, FileText, Image as ImageIcon } from 'lucide-react';
+import { resolveDocumentUrl } from '../../lib/documentStorage';
 
 interface DocumentPreviewModalProps {
   isOpen: boolean;
@@ -20,17 +21,34 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
   docNombre = 'documento',
   docTipo,
 }) => {
+  const [resolvedUrl, setResolvedUrl] = useState<string>(docUrl);
+
+  useEffect(() => {
+    let active = true;
+    if (docUrl && docUrl.startsWith('idb:')) {
+      resolveDocumentUrl(docUrl).then((url) => {
+        if (active && url) setResolvedUrl(url);
+      });
+    } else {
+      setResolvedUrl(docUrl);
+    }
+    return () => {
+      active = false;
+    };
+  }, [docUrl]);
+
   if (!isOpen || !docUrl) return null;
 
+  const currentUrl = resolvedUrl || docUrl;
   const isPdf =
     docTipo === 'PDF' ||
-    docUrl.startsWith('data:application/pdf') ||
-    docUrl.toLowerCase().endsWith('.pdf') ||
-    docUrl.includes('application/pdf');
+    currentUrl.startsWith('data:application/pdf') ||
+    currentUrl.toLowerCase().includes('.pdf') ||
+    currentUrl.includes('application/pdf');
 
   const handleDownload = () => {
     const a = document.createElement('a');
-    a.href = docUrl;
+    a.href = currentUrl;
     a.download = docNombre || (isPdf ? 'pedigree-documento.pdf' : 'pedigree-documento.png');
     document.body.appendChild(a);
     a.click();
@@ -77,7 +95,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({
               <span className="hidden sm:inline">Descargar</span>
             </button>
             <a
-              href={docUrl}
+              href={currentUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors border border-slate-200 cursor-pointer"

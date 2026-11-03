@@ -1,12 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Ejemplar, Sexo, EstadoReproductivo, EstadoEjemplar, CalificacionDisplasiaCadera, CalificacionDisplasiaCodo } from '../../types';
-import { X, Dog, Save, Image, Check, Upload, Camera, CheckCircle2, Loader2, Trash2, Cloud, Globe, ExternalLink, Download, AlertTriangle, FileText, Sparkles } from 'lucide-react';
+import { X, Dog, Save, Image, Check, Upload, Camera, CheckCircle2, Loader2, Trash2, Cloud, Globe, ExternalLink, Download, AlertTriangle, FileText, Sparkles, Eye, ChevronDown, ChevronUp } from 'lucide-react';
 import { uploadDogPhoto, db, auth } from '../../lib/firebase';
-import { collection, addDoc, doc, setDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, setDoc, query, where, getDocs } from 'firebase/firestore';
 import { cleanForFirestore } from '../../lib/dogUtils';
 import * as pdfjsLib from 'pdfjs-dist';
 import Tesseract from 'tesseract.js';
+import { DocumentPreviewModal } from '../common/DocumentPreviewModal';
+import { persistPedigreeDocument, resolveDocumentUrl } from '../../lib/documentStorage';
 
 // Configure pdfjs-dist worker for browser execution
 if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
@@ -16,6 +18,7 @@ if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
 interface DogFormModalProps {
   dog?: Ejemplar | null;
   onClose: () => void;
+  isCloning?: boolean;
 }
 
 /**
@@ -67,7 +70,7 @@ export function calculateExactAge(birthDateStr?: string): string {
   return months > 0 ? `${yearsStr}, ${months}m` : yearsStr;
 }
 
-export const DogFormModal: React.FC<DogFormModalProps> = ({ dog, onClose }) => {
+export const DogFormModal: React.FC<DogFormModalProps> = ({ dog, onClose, isCloning }) => {
   const {
     addEjemplar,
     updateEjemplar,
@@ -83,6 +86,7 @@ export const DogFormModal: React.FC<DogFormModalProps> = ({ dog, onClose }) => {
   // Submit & Loading UX States
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [ocrLoading, setOcrLoading] = useState(false);
+  const [uploadProgressText, setUploadProgressText] = useState<string>('Procesando documento...');
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Pedigree Extraction Feedback States
@@ -103,6 +107,9 @@ export const DogFormModal: React.FC<DogFormModalProps> = ({ dog, onClose }) => {
   const [pelo, setPelo] = useState<'CORTO' | 'LARGO' | 'MEDIO'>(dog?.pelo || 'CORTO');
   const [estadoReproductivo, setEstadoReproductivo] = useState<EstadoReproductivo>(dog?.estadoReproductivo || 'ACTIVO');
   const [estado, setEstado] = useState<EstadoEjemplar>(dog?.estado || 'ACTIVO');
+  const [esDelPlantel, setEsDelPlantel] = useState<boolean>(
+    dog?.esDelPlantel !== undefined ? dog.esDelPlantel : (dog?.esExterno !== undefined ? !dog.esExterno : true)
+  );
   const [fotoUrl, setFotoUrl] = useState(dog?.fotoUrl || '');
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState<string | null>(null);
@@ -137,6 +144,20 @@ export const DogFormModal: React.FC<DogFormModalProps> = ({ dog, onClose }) => {
 
   // Great-grandparents (bisabuelos)
   const [bisabuelos, setBisabuelos] = useState<Ejemplar['bisabuelos']>(dog?.bisabuelos || {});
+  const [showBisabuelos, setShowBisabuelos] = useState(
+    Boolean(dog?.bisabuelos && Object.values(dog.bisabuelos).some(Boolean))
+  );
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+
+  // Available registered males and females for ancestry selection
+  const machos = useMemo(
+    () => ejemplares.filter((e) => e.sexo === 'MACHO' && (!dog || e.id !== dog.id)),
+    [ejemplares, dog]
+  );
+  const hembras = useMemo(
+    () => ejemplares.filter((e) => e.sexo === 'HEMBRA' && (!dog || e.id !== dog.id)),
+    [ejemplares, dog]
+  );
 
   // Distinct Afijos for suggestions
   const availableAfijos = useMemo(() => {
@@ -150,9 +171,29 @@ export const DogFormModal: React.FC<DogFormModalProps> = ({ dog, onClose }) => {
     return list;
   }, [currentCriadero, ejemplares]);
 
+  const handleDownloadPedigreeDoc = async () => {
+    if (!pedigreeDocUrl) return;
+    try {
+      const url = await resolveDocumentUrl(pedigreeDocUrl);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download =
+        pedigreeDocNombre ||
+        `pedigree-${(nombreCompleto || 'ejemplar').replace(/\s+/g, '_')}.${
+          pedigreeDocTipo === 'IMAGEN' ? 'jpg' : 'pdf'
+        }`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (e) {
+      console.warn('Error downloading pedigree doc:', e);
+    }
+  };
+
   // Hybrid OCR: Extracts text from PDF (using pdfjs-dist) or Image (using Tesseract.js), then parses with Regex
   const handleProcessPedigreeFile = async (file: File) => {
     setOcrLoading(true);
+    setUploadProgressText('Iniciando subida y almacenamiento seguro del documento...');
     setPdfExtractionError(null);
     setPdfExtractionSuccess(null);
 
@@ -161,18 +202,26 @@ export const DogFormModal: React.FC<DogFormModalProps> = ({ dog, onClose }) => {
     const docSize = `${(file.size / 1024).toFixed(0)} KB`;
     const docDate = new Date().toISOString().split('T')[0];
 
-    // Read file as base64 to keep it attached to the dog record
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      if (ev.target?.result) {
-        setPedigreeDocUrl(ev.target.result as string);
-        setPedigreeDocNombre(file.name);
-        setPedigreeDocTipo(docType);
-        setPedigreeDocSize(docSize);
-        setPedigreeDocFecha(docDate);
-      }
-    };
-    reader.readAsDataURL(file);
+    // Persist file securely to Firebase Storage or server fallback so it survives F5 and stays attached
+    try {
+      const persisted = await persistPedigreeDocument(
+        file,
+        nombreCompleto || 'ejemplar',
+        (pct, text) => setUploadProgressText(text)
+      );
+      setPedigreeDocUrl(persisted.url);
+      setPedigreeDocNombre(persisted.docNombre);
+      setPedigreeDocTipo(persisted.docTipo);
+      setPedigreeDocSize(persisted.sizeStr);
+      setPedigreeDocFecha(docDate);
+      setUploadProgressText('Extrayendo texto y antepasados del pedigree...');
+    } catch (persistErr) {
+      console.warn('Persistencia de documento falló:', persistErr);
+      setPedigreeDocNombre(file.name);
+      setPedigreeDocTipo(docType);
+      setPedigreeDocSize(docSize);
+      setPedigreeDocFecha(docDate);
+    }
 
     try {
       let extractedText = '';
@@ -401,29 +450,82 @@ export const DogFormModal: React.FC<DogFormModalProps> = ({ dog, onClose }) => {
       return;
     }
 
-    // Evitar ejemplares duplicados
+    // Normalización de texto para validación case-insensitive
     const norm = (s?: string) => (s || '').trim().toLowerCase();
     const cleanPOA = norm(numeroPOA);
     const cleanChip = norm(microchip);
     const cleanNameLower = norm(cleanName);
 
-    const isDuplicate = ejemplares.some((existing) => {
-      if (dog && existing.id === dog.id) return false;
-      if (existing.criaderoId !== currentCriaderoId) return false;
-      if (norm(existing.nombreCompleto) === cleanNameLower) return true;
-      if (cleanPOA && norm(existing.numeroPOA) === cleanPOA) return true;
-      if (cleanChip && norm(existing.microchip) === cleanChip) return true;
-      return false;
-    });
+    setIsSubmitting(true);
 
-    if (isDuplicate) {
-      setSubmitError(
-        'Ya existe un ejemplar registrado con este mismo nombre, número POA o microchip en tu criadero. Evitá crear duplicados.'
-      );
-      return;
+    // Identificador del criadero para aislamiento y persistencia
+    const resolvedCriaderoId =
+      (currentUser as any)?.uid ||
+      auth.currentUser?.uid ||
+      currentUser?.id ||
+      currentCriaderoId ||
+      'cria-demo';
+
+    // Validación asíncrona contra Firestore para evitar Ejemplares duplicados
+    try {
+      let duplicateFound = false;
+      let existingDogName = '';
+
+      try {
+        const ejemplaresRef = collection(db, 'ejemplares');
+        const q = query(ejemplaresRef, where('criaderoId', '==', resolvedCriaderoId));
+        const querySnapshot = await getDocs(q);
+
+        querySnapshot.forEach((docSnap) => {
+          if (dog && docSnap.id === dog.id) return;
+          const data = docSnap.data();
+          const docNameLower = norm(data.nombreCompleto);
+          const docPOA = norm(data.numeroPOA);
+          const docChip = norm(data.microchip);
+
+          if (docNameLower === cleanNameLower) {
+            duplicateFound = true;
+            existingDogName = data.nombreCompleto;
+          } else if (cleanPOA && docPOA === cleanPOA) {
+            duplicateFound = true;
+            existingDogName = `${data.nombreCompleto} (POA: ${data.numeroPOA})`;
+          } else if (cleanChip && docChip === cleanChip) {
+            duplicateFound = true;
+            existingDogName = `${data.nombreCompleto} (Microchip: ${data.microchip})`;
+          }
+        });
+      } catch (firestoreErr) {
+        console.warn('Consulta Firestore en validación:', firestoreErr);
+      }
+
+      // Validación complementaria sobre ejemplares en memoria local
+      if (!duplicateFound) {
+        const localDuplicate = ejemplares.find((existing) => {
+          if (dog && existing.id === dog.id) return false;
+          if (existing.criaderoId && existing.criaderoId !== resolvedCriaderoId) return false;
+          if (norm(existing.nombreCompleto) === cleanNameLower) return true;
+          if (cleanPOA && norm(existing.numeroPOA) === cleanPOA) return true;
+          if (cleanChip && norm(existing.microchip) === cleanChip) return true;
+          return false;
+        });
+
+        if (localDuplicate) {
+          duplicateFound = true;
+          existingDogName = localDuplicate.nombreCompleto;
+        }
+      }
+
+      if (duplicateFound) {
+        const msg = `Ya existe un ejemplar registrado con el mismo nombre o identificación ("${existingDogName || cleanName}") en este criadero. No se permiten registros duplicados.`;
+        setSubmitError(msg);
+        alert(msg);
+        setIsSubmitting(false);
+        return;
+      }
+    } catch (dupErr) {
+      console.error('Error al validar duplicado:', dupErr);
     }
 
-    setIsSubmitting(true);
     try {
       const titulos = titulosRaw
         .split(',')
@@ -479,9 +581,11 @@ export const DogFormModal: React.FC<DogFormModalProps> = ({ dog, onClose }) => {
         adn: adn.trim(),
         titulos,
         observaciones: observaciones.trim(),
+        esDelPlantel,
+        esExterno: !esDelPlantel,
       };
 
-      if (dog) {
+      if (dog && !isCloning) {
         // Edit existing dog
         await updateEjemplar(dog.id, data);
         const cleanPayload = cleanForFirestore(data);
@@ -525,10 +629,14 @@ export const DogFormModal: React.FC<DogFormModalProps> = ({ dog, onClose }) => {
             </div>
             <div>
               <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                {dog ? 'Editar Ejemplar' : 'Alta de Nuevo Ejemplar'}
+                {isCloning
+                  ? 'Agregar Ejemplar a Mi Plantel (Clonar)'
+                  : dog
+                  ? 'Editar Ejemplar'
+                  : 'Alta de Nuevo Ejemplar'}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Criadero: {currentCriadero?.nombre} ({currentCriadero?.afijo})
+                Criadero destino: {currentCriadero?.nombre} ({currentCriadero?.afijo || 'Mi Criadero'})
               </p>
             </div>
           </div>
@@ -589,93 +697,64 @@ export const DogFormModal: React.FC<DogFormModalProps> = ({ dog, onClose }) => {
           )}
 
           {/* Prominent Smart Pedigree OCR & Autocomplete Banner */}
+          {/* Genealogía Automática POA Banner */}
           <div className="p-3 sm:p-4 rounded-2xl bg-gradient-to-r from-blue-50/90 to-indigo-50/90 dark:from-blue-950/40 dark:to-indigo-950/40 border border-blue-200 dark:border-blue-900/60 shadow-2xs">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-xl bg-blue-600 text-white shadow-xs shrink-0">
-                  <Sparkles className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <strong className="text-slate-900 dark:text-white font-bold text-xs">
-                      OCR Híbrido: Autocompletar Genealogía (PDF o Imagen)
-                    </strong>
-                    <span className="px-1.5 py-0.2 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 font-bold text-[9px]">
-                      pdf.js + Tesseract
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
-                    Subí el certificado de pedigree oficial para extraer automáticamente números POA, Padre, Madre y Abuelos.
-                  </p>
-                </div>
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-blue-600 text-white shadow-xs shrink-0">
+                <Sparkles className="w-4 h-4" />
               </div>
-
-              <label className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer shrink-0 disabled:opacity-50">
-                {ocrLoading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Procesando OCR...</span>
-                  </>
-                ) : (
-                  <>
-                    <FileText className="w-4 h-4" />
-                    <span>Subir Pedigree (PDF/Imagen)</span>
-                  </>
-                )}
-                <input
-                  type="file"
-                  accept="application/pdf,image/*"
-                  disabled={ocrLoading || isSubmitting}
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleProcessPedigreeFile(file);
-                  }}
-                />
-              </label>
+              <div>
+                <strong className="text-slate-900 dark:text-white font-bold text-xs block">
+                  Árbol Genealógico POA 100% Automatizado
+                </strong>
+                <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
+                  El sistema rastrea y autocompleta dinámicamente las 4 generaciones y calcula la consanguinidad en base a los padres y ejemplares registrados en la base de datos, sin necesidad de cargar un archivo PDF de pedigree.
+                </p>
+              </div>
             </div>
           </div>
-
-          {/* OCR Processing Feedback Banners */}
-          {ocrLoading && (
-            <div className="p-3.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 flex items-center gap-2.5">
-              <Loader2 className="w-4 h-4 text-blue-600 animate-spin shrink-0" />
-              <div>
-                <strong className="block font-bold">Extrayendo texto y genealogía con OCR...</strong>
-                <span className="text-[11px] text-blue-700">Analizando el certificado de pedigree, identificando prefijos POA/FCA y mapeando antepasados.</span>
-              </div>
-            </div>
-          )}
-
-          {pdfExtractionSuccess && (
-            <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span className="font-bold text-xs">{pdfExtractionSuccess}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPdfExtractionSuccess(null)}
-                className="text-emerald-700 hover:text-emerald-900 text-xs font-bold px-1"
-              >
-                ✕
-              </button>
-            </div>
-          )}
-
-          {pdfExtractionError && (
-            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex items-center gap-2 font-medium">
-              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-              <span>{pdfExtractionError}</span>
-            </div>
-          )}
 
           {/* TAB 1: DATOS */}
           {activeFormTab === 'DATOS' && (
             <div className="space-y-3">
+              {/* Toggle Pertenece al Plantel vs Ejemplar Externo */}
+              <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-900 dark:text-white text-xs">
+                      ¿Pertenece al plantel del criadero?
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        esDelPlantel
+                          ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
+                          : 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300'
+                      }`}
+                    >
+                      {esDelPlantel ? 'Plantel Oficial' : 'Ejemplar Externo (Servicio/Invitado)'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    {esDelPlantel
+                      ? 'Aparece en la cuadrícula principal de ejemplares del criadero.'
+                      : 'Macho o hembra externa. No aparece en la grilla principal del plantel, pero suma estadísticas en camadas.'}
+                  </p>
+                </div>
+
+                <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={esDelPlantel}
+                    onChange={(e) => setEsDelPlantel(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-slate-600 peer-checked:bg-blue-600"></div>
+                </label>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
                     Nombre Completo *
                   </label>
                   <input
@@ -1063,174 +1142,304 @@ export const DogFormModal: React.FC<DogFormModalProps> = ({ dog, onClose }) => {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-                  <h4 className="font-bold text-blue-700 uppercase text-[11px]">Línea Paterna</h4>
+                {/* Línea Paterna */}
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5">
+                  <div className="flex items-center justify-between border-b border-slate-200/80 pb-1.5">
+                    <h4 className="font-bold text-blue-700 uppercase text-[11px] flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+                      <span>Línea Paterna</span>
+                    </h4>
+                    {machos.length > 0 && (
+                      <span className="text-[10px] text-slate-500 font-medium">Podés escribir o elegir</span>
+                    )}
+                  </div>
+
                   <div>
-                    <label className="block text-slate-600 mb-1">Padre</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-slate-700 font-bold text-xs">Padre</label>
+                      {machos.length > 0 && (
+                        <select
+                          onChange={(e) => {
+                            const selected = machos.find((m) => m.id === e.target.value);
+                            if (selected) {
+                              setPadreNombre(selected.nombreCompleto);
+                              setPadreId(selected.id);
+                              if (selected.abueloPaterno && !abueloPaterno) setAbueloPaterno(selected.abueloPaterno);
+                              if (selected.abuelaPaterna && !abuelaPaterna) setAbuelaPaterna(selected.abuelaPaterna);
+                            }
+                          }}
+                          className="text-[10px] bg-white border border-slate-200 text-blue-700 font-semibold px-2 py-0.5 rounded cursor-pointer"
+                          defaultValue=""
+                        >
+                          <option value="" disabled>Seleccionar macho registrado...</option>
+                          {machos.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.nombreCompleto} {m.numeroPOA ? `(POA: ${m.numeroPOA})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
                     <input
                       type="text"
                       value={padreNombre}
-                      onChange={(e) => setPadreNombre(e.target.value)}
+                      onChange={(e) => {
+                        setPadreNombre(e.target.value);
+                        setPadreId('');
+                      }}
                       placeholder="VA1 Gary vom Hühnegrab"
-                      className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-xs"
+                      className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-xs text-xs font-semibold"
                     />
                   </div>
+
                   <div>
-                    <label className="block text-slate-600 mb-1">Abuelo Paterno</label>
+                    <label className="block text-slate-600 mb-1 text-[11px] font-semibold">Abuelo Paterno</label>
                     <input
                       type="text"
                       value={abueloPaterno}
                       onChange={(e) => setAbueloPaterno(e.target.value)}
                       placeholder="2X VA1 Vegas du Haut Mansard"
-                      className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-xs"
+                      className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-xs text-xs"
                     />
                   </div>
+
                   <div>
-                    <label className="block text-slate-600 mb-1">Abuela Paterna</label>
+                    <label className="block text-slate-600 mb-1 text-[11px] font-semibold">Abuela Paterna</label>
                     <input
                       type="text"
                       value={abuelaPaterna}
                       onChange={(e) => setAbuelaPaterna(e.target.value)}
                       placeholder="V Patricia vom Hühnegrab"
-                      className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-xs"
+                      className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-xs text-xs"
                     />
                   </div>
                 </div>
 
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-                  <h4 className="font-bold text-pink-700 uppercase text-[11px]">Línea Materna</h4>
+                {/* Línea Materna */}
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5">
+                  <div className="flex items-center justify-between border-b border-slate-200/80 pb-1.5">
+                    <h4 className="font-bold text-pink-700 uppercase text-[11px] flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-pink-600"></span>
+                      <span>Línea Materna</span>
+                    </h4>
+                    {hembras.length > 0 && (
+                      <span className="text-[10px] text-slate-500 font-medium">Podés escribir o elegir</span>
+                    )}
+                  </div>
+
                   <div>
-                    <label className="block text-slate-600 mb-1">Madre</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-slate-700 font-bold text-xs">Madre</label>
+                      {hembras.length > 0 && (
+                        <select
+                          onChange={(e) => {
+                            const selected = hembras.find((h) => h.id === e.target.value);
+                            if (selected) {
+                              setMadreNombre(selected.nombreCompleto);
+                              setMadreId(selected.id);
+                              if (selected.abueloMaterno && !abueloMaterno) setAbueloMaterno(selected.abueloMaterno);
+                              if (selected.abuelaMaterna && !abuelaMaterna) setAbuelaMaterna(selected.abuelaMaterna);
+                            }
+                          }}
+                          className="text-[10px] bg-white border border-slate-200 text-pink-700 font-semibold px-2 py-0.5 rounded cursor-pointer"
+                          defaultValue=""
+                        >
+                          <option value="" disabled>Seleccionar hembra registrada...</option>
+                          {hembras.map((h) => (
+                            <option key={h.id} value={h.id}>
+                              {h.nombreCompleto} {h.numeroPOA ? `(POA: ${h.numeroPOA})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
                     <input
                       type="text"
                       value={madreNombre}
-                      onChange={(e) => setMadreNombre(e.target.value)}
+                      onChange={(e) => {
+                        setMadreNombre(e.target.value);
+                        setMadreId('');
+                      }}
                       placeholder="V Cira von der Liebeswarte"
-                      className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-xs"
+                      className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-pink-500/20 focus:border-pink-500 shadow-xs text-xs font-semibold"
                     />
                   </div>
+
                   <div>
-                    <label className="block text-slate-600 mb-1">Abuelo Materno</label>
+                    <label className="block text-slate-600 mb-1 text-[11px] font-semibold">Abuelo Materno</label>
                     <input
                       type="text"
                       value={abueloMaterno}
                       onChange={(e) => setAbueloMaterno(e.target.value)}
                       placeholder="VA Omen v. Radhaus"
-                      className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-xs"
+                      className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-pink-500/20 focus:border-pink-500 shadow-xs text-xs"
                     />
                   </div>
+
                   <div>
-                    <label className="block text-slate-600 mb-1">Abuela Materna</label>
+                    <label className="block text-slate-600 mb-1 text-[11px] font-semibold">Abuela Materna</label>
                     <input
                       type="text"
                       value={abuelaMaterna}
                       onChange={(e) => setAbuelaMaterna(e.target.value)}
                       placeholder="V Xara del Plata"
-                      className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-xs"
+                      className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-pink-500/20 focus:border-pink-500 shadow-xs text-xs"
                     />
                   </div>
                 </div>
               </div>
 
-              {/* Documento Oficial de Pedigree (PDF o Imagen) */}
-              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
-                    <FileText className="w-4 h-4 text-blue-600" />
-                    <span>Documento de Pedigree Oficial (PDF o Imagen)</span>
-                  </h4>
-                  {pedigreeDocUrl && (
-                    <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[10px] font-bold">
-                      {pedigreeDocTipo || 'Archivo cargado'}
-                    </span>
-                  )}
-                </div>
+              {/* Bisabuelos Accordion (4ª Generación) */}
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+                <button
+                  type="button"
+                  onClick={() => setShowBisabuelos(!showBisabuelos)}
+                  className="w-full flex items-center justify-between text-xs font-bold text-slate-800 hover:text-blue-700 transition-colors cursor-pointer"
+                >
+                  <span className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-500" />
+                    <span>Bisabuelos (4ª Generación - 8 Bisabuelos del Pedigree)</span>
+                  </span>
+                  <div className="flex items-center gap-1 text-[11px] text-blue-600">
+                    <span>{showBisabuelos ? 'Ocultar' : 'Ver / Editar Bisabuelos'}</span>
+                    {showBisabuelos ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </div>
+                </button>
 
-                {pedigreeDocUrl ? (
-                  <div className="p-3 bg-white border border-blue-200 rounded-xl flex items-center justify-between gap-3 shadow-xs">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="p-2 rounded-lg bg-blue-50 text-blue-700 shrink-0">
-                        <FileText className="w-5 h-5" />
-                      </div>
-                      <div className="min-w-0">
-                        <strong className="text-slate-900 text-xs truncate block font-bold">
-                          {pedigreeDocNombre || 'pedigree-documento'}
+                {showBisabuelos && (
+                  <div className="space-y-3 pt-2 border-t border-slate-200">
+                    <p className="text-[11px] text-slate-500">
+                      Podés ingresar o editar manualmente los 8 bisabuelos para completar el árbol genealógico completo de 4 generaciones.
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      {/* Bisabuelos Paternos */}
+                      <div className="space-y-2 p-2.5 rounded-lg bg-blue-50/50 border border-blue-100">
+                        <strong className="text-[11px] uppercase font-bold text-blue-800 block">
+                          Bisabuelos Paternos
                         </strong>
-                        <div className="text-[10px] text-slate-500 flex items-center gap-2">
-                          <span>{pedigreeDocFecha || 'Reciente'}</span>
-                          {pedigreeDocSize && (
-                            <>
-                              <span>•</span>
-                              <span>{pedigreeDocSize}</span>
-                            </>
-                          )}
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                            Padre de {abueloPaterno || 'Abuelo Paterno'} (PP)
+                          </label>
+                          <input
+                            type="text"
+                            value={bisabuelos?.pp_p || ''}
+                            onChange={(e) =>
+                              setBisabuelos((prev) => ({ ...prev, pp_p: e.target.value }))
+                            }
+                            placeholder="ej: VA Pakros d'Ulmental"
+                            className="w-full px-2 py-1.5 rounded-md bg-white border border-slate-200 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                            Madre de {abueloPaterno || 'Abuelo Paterno'} (PM)
+                          </label>
+                          <input
+                            type="text"
+                            value={bisabuelos?.pp_m || ''}
+                            onChange={(e) =>
+                              setBisabuelos((prev) => ({ ...prev, pp_m: e.target.value }))
+                            }
+                            placeholder="ej: VA Karma vom Ochsentor"
+                            className="w-full px-2 py-1.5 rounded-md bg-white border border-slate-200 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                            Padre de {abuelaPaterna || 'Abuela Paterna'} (MP)
+                          </label>
+                          <input
+                            type="text"
+                            value={bisabuelos?.pm_p || ''}
+                            onChange={(e) =>
+                              setBisabuelos((prev) => ({ ...prev, pm_p: e.target.value }))
+                            }
+                            placeholder="ej: VA Dux de Cuatro Flores"
+                            className="w-full px-2 py-1.5 rounded-md bg-white border border-slate-200 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                            Madre de {abuelaPaterna || 'Abuela Paterna'} (MM)
+                          </label>
+                          <input
+                            type="text"
+                            value={bisabuelos?.pm_m || ''}
+                            onChange={(e) =>
+                              setBisabuelos((prev) => ({ ...prev, pm_m: e.target.value }))
+                            }
+                            placeholder="ej: V Danka vom Hühnegrab"
+                            className="w-full px-2 py-1.5 rounded-md bg-white border border-slate-200 text-xs"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Bisabuelos Maternos */}
+                      <div className="space-y-2 p-2.5 rounded-lg bg-pink-50/50 border border-pink-100">
+                        <strong className="text-[11px] uppercase font-bold text-pink-800 block">
+                          Bisabuelos Maternos
+                        </strong>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                            Padre de {abueloMaterno || 'Abuelo Materno'} (PP)
+                          </label>
+                          <input
+                            type="text"
+                            value={bisabuelos?.mp_p || ''}
+                            onChange={(e) =>
+                              setBisabuelos((prev) => ({ ...prev, mp_p: e.target.value }))
+                            }
+                            placeholder="ej: VA Remo vom Fichtenschlag"
+                            className="w-full px-2 py-1.5 rounded-md bg-white border border-slate-200 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                            Madre de {abueloMaterno || 'Abuelo Materno'} (PM)
+                          </label>
+                          <input
+                            type="text"
+                            value={bisabuelos?.mp_m || ''}
+                            onChange={(e) =>
+                              setBisabuelos((prev) => ({ ...prev, mp_m: e.target.value }))
+                            }
+                            placeholder="ej: V Ophelia von Aurelius"
+                            className="w-full px-2 py-1.5 rounded-md bg-white border border-slate-200 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                            Padre de {abuelaMaterna || 'Abuela Materna'} (MP)
+                          </label>
+                          <input
+                            type="text"
+                            value={bisabuelos?.mm_p || ''}
+                            onChange={(e) =>
+                              setBisabuelos((prev) => ({ ...prev, mm_p: e.target.value }))
+                            }
+                            placeholder="ej: 2X VA Iliano del Seprio"
+                            className="w-full px-2 py-1.5 rounded-md bg-white border border-slate-200 text-xs"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-600 mb-0.5">
+                            Madre de {abuelaMaterna || 'Abuela Materna'} (MM)
+                          </label>
+                          <input
+                            type="text"
+                            value={bisabuelos?.mm_m || ''}
+                            onChange={(e) =>
+                              setBisabuelos((prev) => ({ ...prev, mm_m: e.target.value }))
+                            }
+                            placeholder="ej: V Tina del Plata"
+                            className="w-full px-2 py-1.5 rounded-md bg-white border border-slate-200 text-xs"
+                          />
                         </div>
                       </div>
                     </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      <a
-                        href={pedigreeDocUrl}
-                        download={pedigreeDocNombre || 'pedigree.pdf'}
-                        className="p-1.5 rounded-lg text-slate-600 hover:text-blue-700 hover:bg-slate-100 cursor-pointer"
-                        title="Descargar archivo"
-                      >
-                        <Download className="w-4 h-4" />
-                      </a>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPedigreeDocUrl('');
-                          setPedigreeDocNombre('');
-                          setPedigreeDocTipo(undefined);
-                          setPedigreeDocSize('');
-                          setPedigreeDocFecha('');
-                        }}
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 cursor-pointer"
-                        title="Eliminar archivo"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
                   </div>
-                ) : (
-                  <label className={`p-4 rounded-xl bg-white border-2 border-dashed transition-colors flex flex-col items-center justify-center cursor-pointer text-center group shadow-2xs ${
-                    ocrLoading ? 'border-blue-400 bg-blue-50/40 cursor-wait' : 'border-slate-300 hover:border-blue-400'
-                  }`}>
-                    {ocrLoading ? (
-                      <>
-                        <Loader2 className="w-6 h-6 text-blue-600 animate-spin mb-1" />
-                        <span className="font-bold text-blue-700 text-xs">
-                          Extrayendo texto y genealogía con OCR...
-                        </span>
-                        <span className="text-[10px] text-slate-500 mt-0.5">
-                          Identificando padres, abuelos y bisabuelos del certificado oficial
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="w-6 h-6 text-slate-400 group-hover:text-blue-600 transition-colors mb-1" />
-                        <span className="font-bold text-slate-700 text-xs">
-                          Subir Certificado de Pedigree (PDF o Imagen)
-                        </span>
-                        <span className="text-[10px] text-slate-500 mt-0.5">
-                          Autocompleta automáticamente las 4 generaciones y adjunta el documento
-                        </span>
-                      </>
-                    )}
-                    <input
-                      type="file"
-                      accept="application/pdf,image/*"
-                      disabled={ocrLoading || isSubmitting}
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          handleProcessPedigreeFile(file);
-                        }
-                      }}
-                    />
-                  </label>
                 )}
               </div>
             </div>
@@ -1355,6 +1564,19 @@ export const DogFormModal: React.FC<DogFormModalProps> = ({ dog, onClose }) => {
           </div>
         </form>
       </div>
+
+      {/* Pedigree Document Preview Modal */}
+      {isPreviewOpen && pedigreeDocUrl && (
+        <DocumentPreviewModal
+          isOpen={isPreviewOpen}
+          onClose={() => setIsPreviewOpen(false)}
+          title={`Pedigree Oficial: ${nombreCompleto || 'Ejemplar'}`}
+          subtitle={pedigreeDocNombre}
+          docUrl={pedigreeDocUrl}
+          docNombre={pedigreeDocNombre}
+          docTipo={pedigreeDocTipo}
+        />
+      )}
     </div>
   );
 };

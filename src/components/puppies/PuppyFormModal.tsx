@@ -11,21 +11,67 @@ import {
   CheckCircle2,
   Cloud,
   Loader2,
+  AlertTriangle,
 } from 'lucide-react';
-import { uploadDogPhoto } from '../../lib/firebase';
+import { uploadDogPhoto, db } from '../../lib/firebase';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { getCollarColorHex, getCollarColorName } from '../../lib/dogUtils';
 
 interface PuppyFormModalProps {
   puppy?: Cachorro | null;
+  initialCamadaId?: string;
   onClose: () => void;
 }
 
-export const PuppyFormModal: React.FC<PuppyFormModalProps> = ({ puppy, onClose }) => {
-  const { addCachorro, updateCachorro, camadas, currentCriaderoId } = useApp();
+export const PuppyFormModal: React.FC<PuppyFormModalProps> = ({
+  puppy,
+  initialCamadaId,
+  onClose,
+}) => {
+  const { addCachorro, updateCachorro, cachorros, camadas, currentCriaderoId, currentCriadero } = useApp();
 
-  const [camadaId, setCamadaId] = useState(puppy?.camadaId || camadas[0]?.id || '');
-  const selectedCamada = camadas.find((c) => c.id === camadaId) || camadas[0];
+  const [camadaId, setCamadaId] = useState(
+    initialCamadaId || puppy?.camadaId || camadas[0]?.id || ''
+  );
+  const selectedCamada =
+    camadas.find((c) => c.id === camadaId) ||
+    (initialCamadaId ? camadas.find((c) => c.id === initialCamadaId) : undefined) ||
+    camadas[0];
+
+  const [duplicateError, setDuplicateError] = useState<string | null>(null);
+
+  // Verificación de límite de cachorros para la camada
+  const currentPuppiesInCamada = cachorros.filter((c) => c.camadaId === selectedCamada?.id);
+  const isCamadaFull =
+    !puppy &&
+    Boolean(
+      selectedCamada &&
+      selectedCamada.totalCachorros > 0 &&
+      currentPuppiesInCamada.length >= selectedCamada.totalCachorros
+    );
+
+  const handleCamadaChange = (newCamadaId: string) => {
+    setCamadaId(newCamadaId);
+    setDuplicateError(null);
+    const targetCamada = camadas.find((c) => c.id === newCamadaId);
+    if (targetCamada && !puppy && targetCamada.fechaNacimiento) {
+      setFechaNacimiento(targetCamada.fechaNacimiento);
+    }
+  };
+
+  const criaderoAfijo = (currentCriadero?.afijo || currentCriadero?.nombre || '').trim();
+
+  // Helper to extract base call name if already saved with the affix
+  const extractPila = (fullName?: string): string => {
+    if (!fullName) return '';
+    if (criaderoAfijo && fullName.toLowerCase().endsWith(criaderoAfijo.toLowerCase())) {
+      return fullName.slice(0, fullName.length - criaderoAfijo.length).trim();
+    }
+    return fullName;
+  };
 
   const [nombre, setNombre] = useState(puppy?.nombre || '');
+  const [nombrePila, setNombrePila] = useState(extractPila(puppy?.nombre));
   const [identificadorProvisorio, setIdentificadorProvisorio] = useState(
     puppy?.identificadorProvisorio || 'Cachorro Collar Azul - M1'
   );
@@ -34,8 +80,24 @@ export const PuppyFormModal: React.FC<PuppyFormModalProps> = ({ puppy, onClose }
     puppy?.fechaNacimiento || selectedCamada?.fechaNacimiento || '2026-01-01'
   );
   const [color, setColor] = useState(puppy?.color || 'Negro y Fuego');
-  const [colorCollar, setColorCollar] = useState(puppy?.colorCollar || '#2563eb');
+
+  const initialColorName =
+    puppy?.nombreColorCollar || (puppy?.colorCollar ? getCollarColorName(puppy.colorCollar) : 'Azul');
+  const [nombreColorCollar, setNombreColorCollar] = useState(initialColorName);
+  const [colorCollar, setColorCollar] = useState(
+    puppy?.colorCollar ? getCollarColorHex(puppy.colorCollar, initialColorName) : '#2563eb'
+  );
+
+  const handleCollarNameChange = (val: string) => {
+    setNombreColorCollar(val);
+    const matchedHex = getCollarColorHex(undefined, val);
+    if (matchedHex && matchedHex !== '#2563eb') {
+      setColorCollar(matchedHex);
+    }
+  };
   const [numeroPOA, setNumeroPOA] = useState(puppy?.numeroPOA || '');
+  const [tatuaje, setTatuaje] = useState(puppy?.tatuaje || '');
+  const [pelo, setPelo] = useState<'CORTO' | 'LARGO' | 'MEDIO' | string>(puppy?.pelo || 'CORTO');
   const [microchip, setMicrochip] = useState(puppy?.microchip || '');
   const [pesoNacimientoGramos, setPesoNacimientoGramos] = useState<number>(
     puppy?.pesoNacimientoGramos || 500
@@ -46,6 +108,28 @@ export const PuppyFormModal: React.FC<PuppyFormModalProps> = ({ puppy, onClose }
   const [precio, setPrecio] = useState<number>(puppy?.precio || 1200000);
   const [moneda, setMoneda] = useState<'ARS' | 'USD'>(puppy?.moneda || 'ARS');
   const [senia, setSenia] = useState<number>(puppy?.senia || 0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Auto-complete affix when user writes base call name
+  const handleNombrePilaChange = (pilaVal: string) => {
+    setNombrePila(pilaVal);
+    if (!pilaVal.trim()) {
+      setNombre('');
+    } else if (criaderoAfijo) {
+      setNombre(`${pilaVal.trim()} ${criaderoAfijo}`);
+    } else {
+      setNombre(pilaVal.trim());
+    }
+  };
+
+  const handleApplyAffixToNombre = () => {
+    if (!criaderoAfijo) return;
+    const currentTrimmed = nombre.trim();
+    if (!currentTrimmed) return;
+    if (!currentTrimmed.toLowerCase().endsWith(criaderoAfijo.toLowerCase())) {
+      setNombre(`${currentTrimmed} ${criaderoAfijo}`);
+    }
+  };
 
   // Photo & Firebase Storage
   const [fotoUrl, setFotoUrl] = useState(puppy?.fotoUrl || '');
@@ -94,57 +178,141 @@ export const PuppyFormModal: React.FC<PuppyFormModalProps> = ({ puppy, onClose }
     puppy?.comprador?.fechaEntregaEstimada || ''
   );
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!identificadorProvisorio.trim()) return;
+    if (!identificadorProvisorio.trim() || isSubmitting) return;
 
-    const data: Omit<Cachorro, 'id'> = {
-      criaderoId: currentCriaderoId,
-      camadaId: selectedCamada?.id || '',
-      camadaNombre: selectedCamada?.identificador || 'Camada Activa',
-      padreId: selectedCamada?.padreId || '',
-      padreNombre: selectedCamada?.padreNombre || '',
-      madreId: selectedCamada?.madreId || '',
-      madreNombre: selectedCamada?.madreNombre || '',
-      nombre,
-      identificadorProvisorio,
-      sexo,
-      fechaNacimiento,
-      color,
-      colorCollar,
-      numeroPOA,
-      microchip,
-      pesoNacimientoGramos,
-      pesajes: puppy?.pesajes || [
-        { semana: 0, fecha: fechaNacimiento, pesoGramos: pesoNacimientoGramos },
-      ],
-      vacunas: puppy?.vacunas || [],
-      desparasitaciones: puppy?.desparasitaciones || [],
-      estadoComercial,
-      precio,
-      moneda,
-      senia,
-      fotoUrl: fotoUrl || undefined,
-      comprador: compradorNombre
-        ? {
-            nombre: compradorNombre,
-            dni: compradorDni,
-            telefono: compradorTelefono,
-            email: compradorEmail,
-            domicilio: compradorDomicilio,
-            localidad: compradorLocalidad,
-            fechaEntregaEstimada,
+    try {
+      setIsSubmitting(true);
+      setDuplicateError(null);
+
+      const activeCamada = camadas.find((c) => c.id === camadaId) || selectedCamada;
+      if (!activeCamada) {
+        alert('Por favor selecciona una camada válida de origen.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // 1. Límite máximo de registro por camada
+      if (!puppy) {
+        const pupsInCamada = cachorros.filter((c) => c.camadaId === activeCamada.id);
+        if (
+          activeCamada.totalCachorros > 0 &&
+          pupsInCamada.length >= activeCamada.totalCachorros
+        ) {
+          const limitMsg = `Se ha alcanzado el límite de cachorros declarados para esta camada (${activeCamada.totalCachorros} cachorros en total: ${activeCamada.machos || 0} machos y ${activeCamada.hembras || 0} hembras). No es posible agregar más cachorros.`;
+          setDuplicateError(limitMsg);
+          alert(limitMsg);
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
+      // 2. Validación asíncrona contra Firestore para evitar duplicados en el criadero
+      const cleanNombre = (nombre || '').trim();
+      const cleanTatuaje = (tatuaje || '').trim();
+      const cleanPoa = (numeroPOA || '').trim();
+
+      if (cleanNombre || cleanTatuaje || cleanPoa) {
+        try {
+          const cachorrosRef = collection(db, 'cachorros');
+          const q = query(cachorrosRef, where('criaderoId', '==', currentCriaderoId));
+          const snap = await getDocs(q);
+
+          let duplicateMsg: string | null = null;
+          for (const docSnap of snap.docs) {
+            // Ignorar el cachorro actual si se está editando
+            if (puppy && docSnap.id === puppy.id) continue;
+
+            const docData = docSnap.data();
+            const docNombre = (docData.nombreDefinitivo || docData.nombre || '').trim();
+            const docTatuaje = (docData.tatuaje || '').trim();
+            const docPoa = (docData.numeroPOA || docData.numeroPoa || '').trim();
+
+            if (cleanNombre && docNombre && docNombre.toLowerCase() === cleanNombre.toLowerCase()) {
+              duplicateMsg = `No se puede guardar: Ya existe un cachorro registrado en este criadero con el Nombre Definitivo "${cleanNombre}".`;
+              break;
+            }
+            if (cleanTatuaje && docTatuaje && docTatuaje.toLowerCase() === cleanTatuaje.toLowerCase()) {
+              duplicateMsg = `No se puede guardar: Ya existe un cachorro registrado en este criadero con el Tatuaje POA "${cleanTatuaje}".`;
+              break;
+            }
+            if (cleanPoa && docPoa && docPoa.toLowerCase() === cleanPoa.toLowerCase()) {
+              duplicateMsg = `No se puede guardar: Ya existe un cachorro registrado en este criadero con el Número de POA "${cleanPoa}".`;
+              break;
+            }
           }
-        : undefined,
-    };
 
-    if (puppy) {
-      updateCachorro(puppy.id, data);
-    } else {
-      addCachorro(data);
+          if (duplicateMsg) {
+            setDuplicateError(duplicateMsg);
+            alert(duplicateMsg);
+            setIsSubmitting(false);
+            return;
+          }
+        } catch (queryErr) {
+          console.warn('Advertencia en validación de duplicados de Firestore:', queryErr);
+        }
+      }
+
+      const finalCollarHex = getCollarColorHex(colorCollar, nombreColorCollar);
+
+      const data: Omit<Cachorro, 'id'> = {
+        criaderoId: currentCriaderoId,
+        camadaId: activeCamada.id,
+        camadaNombre: activeCamada.identificador || 'Camada Activa',
+        padreId: activeCamada.padreId || '',
+        padreNombre: activeCamada.padreNombre || '',
+        madreId: activeCamada.madreId || '',
+        madreNombre: activeCamada.madreNombre || '',
+        nombre: nombre.trim() || undefined,
+        nombreDefinitivo: nombre.trim() || undefined,
+        identificadorProvisorio: identificadorProvisorio.trim(),
+        sexo,
+        fechaNacimiento,
+        color,
+        colorCollar: finalCollarHex,
+        nombreColorCollar: nombreColorCollar.trim() || undefined,
+        numeroPOA: numeroPOA.trim() || undefined,
+        tatuaje: tatuaje.trim() || undefined,
+        pelo,
+        microchip: microchip.trim() || undefined,
+        pesoNacimientoGramos,
+        pesajes: puppy?.pesajes || [
+          { semana: 0, fecha: fechaNacimiento, pesoGramos: pesoNacimientoGramos },
+        ],
+        vacunas: puppy?.vacunas || [],
+        desparasitaciones: puppy?.desparasitaciones || [],
+        estadoComercial,
+        precio,
+        moneda,
+        senia,
+        fotoUrl: fotoUrl || undefined,
+        comprador: compradorNombre
+          ? {
+              nombre: compradorNombre,
+              dni: compradorDni,
+              telefono: compradorTelefono,
+              email: compradorEmail,
+              domicilio: compradorDomicilio,
+              localidad: compradorLocalidad,
+              fechaEntregaEstimada,
+            }
+          : undefined,
+      };
+
+      if (puppy) {
+        await updateCachorro(puppy.id, data);
+      } else {
+        await addCachorro(data);
+      }
+
+      onClose();
+    } catch (err) {
+      console.error('Error al guardar cachorro:', err);
+      alert('Ocurrió un error al guardar la ficha del cachorro.');
+    } finally {
+      setIsSubmitting(false);
     }
-
-    onClose();
   };
 
   return (
@@ -175,6 +343,27 @@ export const PuppyFormModal: React.FC<PuppyFormModalProps> = ({ puppy, onClose }
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 text-xs custom-scrollbar">
+          {duplicateError && (
+            <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <div className="text-xs font-semibold leading-relaxed">
+                {duplicateError}
+              </div>
+            </div>
+          )}
+
+          {isCamadaFull && (
+            <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+              <div className="text-xs space-y-0.5">
+                <div className="font-bold">Límite de camada alcanzado</div>
+                <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                  Esta camada ya tiene registrados sus {selectedCamada?.totalCachorros} cachorros declarados ({selectedCamada?.machos || 0} machos y {selectedCamada?.hembras || 0} hembras). No es posible registrar más cachorros en esta camada.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Camada selection */}
           <div>
             <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
@@ -182,7 +371,7 @@ export const PuppyFormModal: React.FC<PuppyFormModalProps> = ({ puppy, onClose }
             </label>
             <select
               value={camadaId}
-              onChange={(e) => setCamadaId(e.target.value)}
+              onChange={(e) => handleCamadaChange(e.target.value)}
               className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             >
               {camadas.map((c) => (
@@ -209,16 +398,51 @@ export const PuppyFormModal: React.FC<PuppyFormModalProps> = ({ puppy, onClose }
             </div>
             <div>
               <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Nombre Definitivo (si ya fue asignado)
+                Nombre de Pila (Base)
               </label>
               <input
                 type="text"
-                value={nombre}
-                onChange={(e) => setNombre(e.target.value)}
-                placeholder="ej: Apolo Von Der Balmaceda"
+                value={nombrePila}
+                onChange={(e) => handleNombrePilaChange(e.target.value)}
+                placeholder="ej: Apolo"
                 className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
               />
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                {criaderoAfijo ? (
+                  <span>
+                    Autocompleta con afijo:{' '}
+                    <strong className="text-blue-600 dark:text-blue-400 font-semibold">{criaderoAfijo}</strong>
+                  </span>
+                ) : (
+                  'Escribe el nombre de pila para autocompletar el nombre con el afijo'
+                )}
+              </p>
             </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block font-semibold text-slate-700 dark:text-slate-300">
+                Nombre Definitivo (Completo / Pedigree)
+              </label>
+              {criaderoAfijo && (
+                <button
+                  type="button"
+                  onClick={handleApplyAffixToNombre}
+                  className="text-[11px] font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 cursor-pointer"
+                  title="Añadir afijo del criadero al final"
+                >
+                  + Concatenar Afijo ({criaderoAfijo})
+                </button>
+              )}
+            </div>
+            <input
+              type="text"
+              value={nombre}
+              onChange={(e) => setNombre(e.target.value)}
+              placeholder={criaderoAfijo ? `ej: Apolo ${criaderoAfijo}` : 'ej: Apolo Von Der Balmaceda'}
+              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            />
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -243,17 +467,29 @@ export const PuppyFormModal: React.FC<PuppyFormModalProps> = ({ puppy, onClose }
               />
             </div>
             <div>
-              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Color del Collar</label>
-              <input
-                type="color"
-                value={colorCollar}
-                onChange={(e) => setColorCollar(e.target.value)}
-                className="w-full h-9 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 cursor-pointer p-1"
-              />
+              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Color del Collar
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={nombreColorCollar}
+                  onChange={(e) => handleCollarNameChange(e.target.value)}
+                  placeholder="ej: Verde agua, Azul, Rojo"
+                  className="w-full px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                />
+                <input
+                  type="color"
+                  value={colorCollar}
+                  onChange={(e) => setColorCollar(e.target.value)}
+                  className="w-10 h-9 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 cursor-pointer p-1 shrink-0"
+                  title="Ajustar color visual"
+                />
+              </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Color / Manto</label>
               <input
@@ -262,6 +498,33 @@ export const PuppyFormModal: React.FC<PuppyFormModalProps> = ({ puppy, onClose }
                 onChange={(e) => setColor(e.target.value)}
                 placeholder="Negro y Fuego"
                 className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">Tipo de Pelo *</label>
+              <select
+                value={pelo}
+                onChange={(e) => setPelo(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white font-bold"
+              >
+                <option value="CORTO">Pelo Corto (Stockhaar)</option>
+                <option value="LARGO">Pelo Largo (Langstockhaar)</option>
+                <option value="MEDIO">Pelo Medio / Variedad</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Número de Tatuaje (Tatuaje POA)
+              </label>
+              <input
+                type="text"
+                value={tatuaje}
+                onChange={(e) => setTatuaje(e.target.value)}
+                placeholder="ej: 12345 o K-1234"
+                className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white font-mono"
               />
             </div>
             <div>
@@ -275,7 +538,7 @@ export const PuppyFormModal: React.FC<PuppyFormModalProps> = ({ puppy, onClose }
               />
             </div>
             <div>
-              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">N° POA</label>
+              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">N° POA (Registro)</label>
               <input
                 type="text"
                 value={numeroPOA}
@@ -322,9 +585,15 @@ export const PuppyFormModal: React.FC<PuppyFormModalProps> = ({ puppy, onClose }
                   </button>
                 </div>
               ) : (
-                <div className="w-20 h-20 rounded-2xl bg-slate-100 dark:bg-slate-800 border-2 border-dashed border-slate-200 dark:border-slate-700 flex flex-col items-center justify-center text-slate-400 shrink-0">
-                  <Camera className="w-6 h-6" />
-                  <span className="text-[9px] mt-1 font-mono">Sin foto</span>
+                <div className="relative group shrink-0">
+                  <img
+                    src="/assets/puppy-dog-pet-german-shepherd-wallpaper-preview.jpg"
+                    alt="Cachorro por defecto"
+                    className="w-20 h-20 rounded-2xl object-cover border-2 border-dashed border-slate-300 dark:border-slate-700 shadow-xs opacity-90"
+                  />
+                  <span className="absolute bottom-1 left-1 right-1 text-center bg-black/60 backdrop-blur-xs text-[8px] font-bold text-white rounded py-0.5">
+                    Por defecto
+                  </span>
                 </div>
               )}
 
@@ -504,10 +773,26 @@ export const PuppyFormModal: React.FC<PuppyFormModalProps> = ({ puppy, onClose }
             </button>
             <button
               type="submit"
-              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold flex items-center gap-2 transition-all shadow-sm shadow-blue-500/20 cursor-pointer"
+              disabled={isSubmitting || isCamadaFull}
+              className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold flex items-center gap-2 transition-all shadow-sm shadow-blue-500/20 cursor-pointer"
             >
-              <Save className="w-4 h-4" />
-              <span>{puppy ? 'Guardar Ficha' : 'Registrar Cachorro'}</span>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  <span>Guardando...</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  <span>
+                    {isCamadaFull
+                      ? 'Cupo de Camada Completo'
+                      : puppy
+                      ? 'Guardar Ficha'
+                      : 'Registrar Cachorro'}
+                  </span>
+                </>
+              )}
             </button>
           </div>
         </form>

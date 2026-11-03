@@ -52,6 +52,8 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileMenu }) => {
     setIsRegisterModalOpen,
     enterRealMode,
     enterDemoMode,
+    globalSearchQuery,
+    setGlobalSearchQuery,
   } = useApp();
 
   const [showNotifications, setShowNotifications] = useState(false);
@@ -62,7 +64,6 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileMenu }) => {
   const [passwordMsg, setPasswordMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const [isMigrating, setIsMigrating] = useState(false);
   const [migrationStatus, setMigrationStatus] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
 
   const unreadNotifs = notificaciones.filter((n) => !n.leida);
 
@@ -139,16 +140,16 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileMenu }) => {
             <Search className="w-4 h-4 text-slate-400 ml-2.5 sm:ml-3 shrink-0" />
             <input
               type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              value={globalSearchQuery}
+              onChange={(e) => setGlobalSearchQuery(e.target.value)}
               onClick={() => setIsSearchOpen(true)}
-              placeholder="Buscar ejemplar, camada..."
+              placeholder="Buscar ejemplar, TAT, POA, microchip, camada..."
               className="w-full text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 px-2 sm:px-3 py-1.5 bg-transparent focus:outline-none cursor-pointer truncate"
             />
             <button
               type="submit"
               className="bg-blue-600 hover:bg-blue-700 text-white p-1.5 sm:p-2 rounded-lg shrink-0 transition-colors cursor-pointer shadow-xs"
-              title="Buscar"
+              title="Buscar en todos los criaderos"
             >
               <Search className="w-3.5 h-3.5" />
             </button>

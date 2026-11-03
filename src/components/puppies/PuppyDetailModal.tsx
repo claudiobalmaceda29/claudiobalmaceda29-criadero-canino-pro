@@ -23,8 +23,16 @@ import {
   Eye,
   Trash2,
   Award,
+  Lock,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
+  Camera,
 } from 'lucide-react';
 import { DocumentPreviewModal } from '../common/DocumentPreviewModal';
+import { formatDateDMY } from '../../lib/dogUtils';
+import { uploadPdfOrDocument } from '../../lib/documentStorage';
+import { uploadDogPhoto } from '../../lib/firebase';
 
 interface PuppyDetailModalProps {
   puppy: Cachorro;
@@ -34,6 +42,7 @@ interface PuppyDetailModalProps {
 
 export const PuppyDetailModal: React.FC<PuppyDetailModalProps> = ({ puppy, onClose, onEdit }) => {
   const {
+    cachorros,
     addPesajeCachorro,
     incorporarCachorroAPlantel,
     openPrintModal,
@@ -42,18 +51,108 @@ export const PuppyDetailModal: React.FC<PuppyDetailModalProps> = ({ puppy, onClo
     currentCriaderoId,
   } = useApp();
 
+  // Keep puppy reactive if updated in Firestore / context
+  const currentPuppy = cachorros.find((c) => c.id === puppy.id) || puppy;
+
   const isSuperAdmin =
     currentUser.rol === 'SUPER_ADMIN' ||
     currentUser.email?.toLowerCase() === 'claudiobalmaceda.ok@gmail.com';
-  const isOwnerBreeder = puppy.criaderoId === currentCriaderoId;
+  const isOwnerBreeder = !currentPuppy.criaderoId || currentPuppy.criaderoId === currentCriaderoId;
+  const isReadOnly = !isSuperAdmin && !isOwnerBreeder;
   const canAccessPedigreeRequest = isSuperAdmin || isOwnerBreeder;
 
   const [activeTab, setActiveTab] = useState<'RESUMEN' | 'PESO' | 'SANIDAD' | 'COMERCIAL'>('RESUMEN');
-  const [nuevaSemana, setNuevaSemana] = useState<number>((puppy.pesajes?.length || 0) + 1);
+  const [nuevaSemana, setNuevaSemana] = useState<number>((currentPuppy.pesajes?.length || 0) + 1);
   const [nuevoPesoGramos, setNuevoPesoGramos] = useState<number>(0);
   const [showAddWeight, setShowAddWeight] = useState(false);
   const [incorporatedSuccess, setIncorporatedSuccess] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+
+  // Photo Upload States
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [photoSuccessMsg, setPhotoSuccessMsg] = useState<string | null>(null);
+  const [photoErrorMsg, setPhotoErrorMsg] = useState<string | null>(null);
+
+  const handleUploadPuppyPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setPhotoErrorMsg('Por favor selecciona una imagen válida (JPG, PNG, WebP).');
+      setTimeout(() => setPhotoErrorMsg(null), 4000);
+      return;
+    }
+
+    setIsUploadingPhoto(true);
+    setPhotoErrorMsg(null);
+    setPhotoSuccessMsg(null);
+    try {
+      const res = await uploadDogPhoto(file, `cachorro_${currentPuppy.id}`);
+      await updateCachorro(currentPuppy.id, { fotoUrl: res.url });
+      setPhotoSuccessMsg('¡Foto del cachorro actualizada y guardada exitosamente!');
+      setTimeout(() => setPhotoSuccessMsg(null), 4000);
+    } catch (err: any) {
+      console.error('Error al subir foto del cachorro:', err);
+      setPhotoErrorMsg(err.message || 'Error al subir la imagen a Firebase Storage.');
+      setTimeout(() => setPhotoErrorMsg(null), 5000);
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
+
+  // PDF Upload & Progress States
+  const [isUploadingPdf, setIsUploadingPdf] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ pct: number; text: string } | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadSuccessMsg, setUploadSuccessMsg] = useState<string | null>(null);
+
+  const handleUploadPuppyPdf = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const inputEl = e.target;
+    const file = inputEl.files?.[0];
+    inputEl.value = ''; // Reset so onChange triggers even if same file is re-selected
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
+      setUploadError('Por favor selecciona un archivo PDF válido (.pdf).');
+      setTimeout(() => setUploadError(null), 4000);
+      return;
+    }
+
+    setIsUploadingPdf(true);
+    setUploadError(null);
+    setUploadSuccessMsg(null);
+    setUploadProgress({ pct: 15, text: 'Iniciando subida de documento...' });
+
+    try {
+      const res = await uploadPdfOrDocument(
+        file,
+        'solicitudes_pedigree',
+        puppy.nombre || puppy.identificadorProvisorio || puppy.id,
+        (pct, text) => {
+          setUploadProgress({ pct, text });
+        }
+      );
+
+      const updates: Partial<Cachorro> = {
+        solicitudPedigreeDocUrl: res.url,
+        solicitudPedigreeDocNombre: res.docNombre,
+        solicitudPedigreeDocFecha: new Date().toISOString().split('T')[0],
+        solicitudPedigreeDocSize: res.sizeStr,
+      };
+
+      await updateCachorro(puppy.id, updates);
+      setUploadSuccessMsg(`¡Archivo "${file.name}" subido y guardado exitosamente en el criadero!`);
+      setTimeout(() => setUploadSuccessMsg(null), 4000);
+    } catch (err: any) {
+      console.error('Error al subir PDF del cachorro:', err);
+      setUploadError(err.message || 'Error al procesar y subir el archivo PDF.');
+      setTimeout(() => setUploadError(null), 5000);
+    } finally {
+      setIsUploadingPdf(false);
+      setUploadProgress(null);
+    }
+  };
 
   const handleAddWeight = (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,11 +168,15 @@ export const PuppyDetailModal: React.FC<PuppyDetailModalProps> = ({ puppy, onClo
     setNuevaSemana(nuevaSemana + 1);
   };
 
-  const handleIncorporarPlantel = () => {
-    const res = incorporarCachorroAPlantel(puppy.id);
-    if (res) {
-      setIncorporatedSuccess(true);
-      setTimeout(() => setIncorporatedSuccess(false), 3000);
+  const handleIncorporarPlantel = async () => {
+    try {
+      const res = await incorporarCachorroAPlantel(puppy.id);
+      if (res) {
+        setIncorporatedSuccess(true);
+        setTimeout(() => setIncorporatedSuccess(false), 3000);
+      }
+    } catch (err) {
+      console.error('Error al incorporar cachorro al plantel:', err);
     }
   };
 
@@ -143,6 +246,21 @@ export const PuppyDetailModal: React.FC<PuppyDetailModalProps> = ({ puppy, onClo
           </div>
         </div>
 
+        {/* Read-Only Notice for Dogs from other Kennels */}
+        {isReadOnly && (
+          <div className="bg-amber-50 border-b border-amber-200 px-4 py-2.5 flex items-center justify-between gap-3 text-xs text-amber-900">
+            <div className="flex items-center gap-2">
+              <Lock className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>
+                <strong>Modo Solo Lectura:</strong> Este cachorro pertenece a otro criadero. Los datos no son modificables.
+              </span>
+            </div>
+            <span className="px-2 py-0.5 rounded-md bg-amber-200/80 text-amber-900 text-[10px] font-black uppercase tracking-wider shrink-0">
+              Solo Lectura
+            </span>
+          </div>
+        )}
+
         {/* Tab Navigation */}
         <div className="flex items-center px-4 border-b border-slate-200 bg-white text-xs overflow-x-auto">
           {[
@@ -175,22 +293,94 @@ export const PuppyDetailModal: React.FC<PuppyDetailModalProps> = ({ puppy, onClo
           {/* TAB 1: RESUMEN */}
           {activeTab === 'RESUMEN' && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              {/* Foto Personalizada del Cachorro con Fallback por defecto */}
+              <div className="relative rounded-2xl overflow-hidden border border-slate-200 bg-slate-900 group shadow-xs">
+                <img
+                  src={currentPuppy.fotoUrl || '/assets/puppy-dog-pet-german-shepherd-wallpaper-preview.jpg'}
+                  alt="Cachorro por defecto"
+                  onError={(e) => {
+                    const target = e.currentTarget as HTMLImageElement;
+                    if (!target.src.includes('puppy-dog-pet-german-shepherd-wallpaper-preview.jpg')) {
+                      target.src = '/assets/puppy-dog-pet-german-shepherd-wallpaper-preview.jpg';
+                    }
+                  }}
+                  className="w-full h-52 sm:h-64 object-cover group-hover:scale-102 transition-transform duration-500"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-900/25 to-transparent pointer-events-none" />
+
+                <div className="absolute bottom-3 left-4 right-4 flex items-center justify-between gap-3">
+                  <div className="text-white drop-shadow-md">
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-300 block">
+                      {currentPuppy.camadaNombre}
+                    </span>
+                    <strong className="text-base sm:text-lg font-black block">
+                      {currentPuppy.nombre || currentPuppy.identificadorProvisorio}
+                    </strong>
+                  </div>
+
+                  {!isReadOnly && (
+                    <label className="px-3.5 py-2 rounded-xl bg-white/95 hover:bg-white text-slate-800 font-bold text-xs flex items-center gap-1.5 shadow-md backdrop-blur-md transition-all hover:scale-105 cursor-pointer shrink-0">
+                      {isUploadingPhoto ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                          <span>Subiendo...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Camera className="w-3.5 h-3.5 text-blue-600" />
+                          <span>{currentPuppy.fotoUrl ? 'Cambiar Foto' : 'Cargar Foto'}</span>
+                        </>
+                      )}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        disabled={isUploadingPhoto}
+                        onChange={handleUploadPuppyPhoto}
+                      />
+                    </label>
+                  )}
+                </div>
+              </div>
+
+              {photoSuccessMsg && (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2 font-medium">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{photoSuccessMsg}</span>
+                </div>
+              )}
+
+              {photoErrorMsg && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2 font-medium">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{photoErrorMsg}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-xs">
                 <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                   <span className="text-[10px] uppercase font-bold text-slate-500 block">Identificador</span>
-                  <strong className="text-slate-900 font-bold">{puppy.identificadorProvisorio}</strong>
+                  <strong className="text-slate-900 font-bold">{currentPuppy.identificadorProvisorio}</strong>
                 </div>
                 <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                   <span className="text-[10px] uppercase font-bold text-slate-500 block">Nacimiento</span>
-                  <strong className="text-slate-900 font-bold">{puppy.fechaNacimiento}</strong>
+                  <strong className="text-slate-900 font-bold">{formatDateDMY(currentPuppy.fechaNacimiento)}</strong>
                 </div>
                 <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                   <span className="text-[10px] uppercase font-bold text-slate-500 block">Peso Nacimiento</span>
-                  <strong className="text-emerald-700 font-mono font-bold">{puppy.pesoNacimientoGramos} g</strong>
+                  <strong className="text-emerald-700 font-mono font-bold">{currentPuppy.pesoNacimientoGramos} g</strong>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <span className="text-[10px] uppercase font-bold text-slate-500 block">Tatuaje POA</span>
+                  <strong className="text-purple-700 font-mono font-bold">{currentPuppy.tatuaje || 'Sin asignar'}</strong>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <span className="text-[10px] uppercase font-bold text-slate-500 block">Tipo de Pelo</span>
+                  <strong className="text-amber-800 font-bold">{currentPuppy.pelo === 'CORTO' ? 'Pelo Corto' : currentPuppy.pelo === 'LARGO' ? 'Pelo Largo' : currentPuppy.pelo === 'MEDIO' ? 'Pelo Medio' : (currentPuppy.pelo || 'Pelo Corto')}</strong>
                 </div>
                 <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                   <span className="text-[10px] uppercase font-bold text-slate-500 block">Microchip</span>
-                  <strong className="text-slate-800 font-mono">{puppy.microchip || 'En colocación'}</strong>
+                  <strong className="text-slate-800 font-mono">{currentPuppy.microchip || 'En colocación'}</strong>
                 </div>
               </div>
 
@@ -280,54 +470,102 @@ export const PuppyDetailModal: React.FC<PuppyDetailModalProps> = ({ puppy, onClo
                           <Download className="w-3.5 h-3.5" />
                           <span>Descargar</span>
                         </a>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            updateCachorro(puppy.id, {
-                              solicitudPedigreeDocUrl: undefined,
-                              solicitudPedigreeDocNombre: undefined,
-                              solicitudPedigreeDocFecha: undefined,
-                              solicitudPedigreeDocSize: undefined,
-                            });
-                          }}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                          title="Eliminar archivo adjunto"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+
+                        {!isReadOnly && (
+                          <>
+                            <label className="px-3 py-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer">
+                              <Upload className="w-3.5 h-3.5 text-blue-600" />
+                              <span>Reemplazar</span>
+                              <input
+                                type="file"
+                                accept="application/pdf"
+                                disabled={isUploadingPdf}
+                                className="hidden"
+                                onChange={handleUploadPuppyPdf}
+                              />
+                            </label>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                updateCachorro(puppy.id, {
+                                  solicitudPedigreeDocUrl: undefined,
+                                  solicitudPedigreeDocNombre: undefined,
+                                  solicitudPedigreeDocFecha: undefined,
+                                  solicitudPedigreeDocSize: undefined,
+                                });
+                              }}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
+                              title="Eliminar archivo adjunto"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
                   ) : (
                     <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
                       <div className="text-[11px] text-slate-600">
-                        ¿Tenés el archivo de solicitud firmado o el PDF emitido? Podés adjuntarlo para tenerlo siempre a mano.
+                        ¿Tenés el archivo de solicitud firmado o el PDF emitido? Podés adjuntarlo para tenerlo siempre a mano y disponible para descarga.
                       </div>
-                      <label className="px-3.5 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 font-bold text-xs flex items-center gap-1.5 border border-slate-300 transition-colors cursor-pointer shrink-0 shadow-2xs">
-                        <Upload className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Subir PDF</span>
-                        <input
-                          type="file"
-                          accept="application/pdf"
-                          className="hidden"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) {
-                              const reader = new FileReader();
-                              reader.onload = (ev) => {
-                                if (ev.target?.result) {
-                                  updateCachorro(puppy.id, {
-                                    solicitudPedigreeDocUrl: ev.target.result as string,
-                                    solicitudPedigreeDocNombre: file.name,
-                                    solicitudPedigreeDocFecha: new Date().toISOString().split('T')[0],
-                                    solicitudPedigreeDocSize: `${(file.size / 1024).toFixed(0)} KB`,
-                                  });
-                                }
-                              };
-                              reader.readAsDataURL(file);
-                            }
-                          }}
+                      {!isReadOnly && (
+                        <label className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 shadow-xs">
+                          {isUploadingPdf ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                              <span>Subiendo PDF...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Upload className="w-3.5 h-3.5 text-white" />
+                              <span>Subir PDF</span>
+                            </>
+                          )}
+                          <input
+                            type="file"
+                            accept="application/pdf"
+                            disabled={isUploadingPdf}
+                            className="hidden"
+                            onChange={handleUploadPuppyPdf}
+                          />
+                        </label>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Real-time PDF Upload Progress Banner */}
+                  {isUploadingPdf && (
+                    <div className="p-3.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 space-y-2">
+                      <div className="flex items-center justify-between text-xs font-bold">
+                        <div className="flex items-center gap-2">
+                          <Loader2 className="w-4 h-4 text-blue-600 animate-spin shrink-0" />
+                          <span>{uploadProgress?.text || 'Subiendo archivo PDF a la nube...'}</span>
+                        </div>
+                        <span className="font-mono text-blue-700">{uploadProgress?.pct || 20}%</span>
+                      </div>
+                      <div className="w-full bg-blue-200 rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
+                          style={{ width: `${uploadProgress?.pct || 20}%` }}
                         />
-                      </label>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Success Feedback Banner */}
+                  {uploadSuccessMsg && (
+                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>{uploadSuccessMsg}</span>
+                    </div>
+                  )}
+
+                  {/* Error Feedback Banner */}
+                  {uploadError && (
+                    <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>{uploadError}</span>
                     </div>
                   )}
                 </div>
@@ -346,36 +584,38 @@ export const PuppyDetailModal: React.FC<PuppyDetailModalProps> = ({ puppy, onClo
               )}
 
               {/* Special action: Incorporate into adult kennel stock */}
-              <div className="p-4 rounded-2xl bg-purple-50 border border-purple-200 flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-1.5 text-purple-800 font-bold text-xs">
-                    <Sparkles className="w-4 h-4 text-purple-600" />
-                    <span>Incorporación al Plantel Activo</span>
+              {!isReadOnly && (
+                <div className="p-4 rounded-2xl bg-purple-50 border border-purple-200 flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-1.5 text-purple-800 font-bold text-xs">
+                      <Sparkles className="w-4 h-4 text-purple-600" />
+                      <span>Incorporación al Plantel Activo</span>
+                    </div>
+                    <p className="text-[11px] text-purple-900/70 mt-1">
+                      Convierte a este cachorro en ejemplar adulto conservando todo su historial y relaciones sin duplicados.
+                    </p>
                   </div>
-                  <p className="text-[11px] text-purple-900/70 mt-1">
-                    Convierte a este cachorro en ejemplar adulto conservando todo su historial y relaciones sin duplicados.
-                  </p>
-                </div>
 
-                <button
-                  onClick={handleIncorporarPlantel}
-                  disabled={puppy.incorporadoAlPlantel}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shrink-0 transition-all ${
-                    puppy.incorporadoAlPlantel
-                      ? 'bg-purple-100 text-purple-600 border border-purple-200 cursor-default'
-                      : 'bg-purple-600 hover:bg-purple-700 text-white shadow-xs cursor-pointer'
-                  }`}
-                >
-                  <Sparkles className="w-4 h-4" />
-                  <span>
-                    {puppy.incorporadoAlPlantel
-                      ? 'Ya en Plantel de Adultos'
-                      : incorporatedSuccess
-                      ? '¡Incorporado con éxito!'
-                      : 'Incorporar al Plantel'}
-                  </span>
-                </button>
-              </div>
+                  <button
+                    onClick={handleIncorporarPlantel}
+                    disabled={puppy.incorporadoAlPlantel}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shrink-0 transition-all ${
+                      puppy.incorporadoAlPlantel
+                        ? 'bg-purple-100 text-purple-600 border border-purple-200 cursor-default'
+                        : 'bg-purple-600 hover:bg-purple-700 text-white shadow-xs cursor-pointer'
+                    }`}
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>
+                      {puppy.incorporadoAlPlantel
+                        ? 'Ya en Plantel de Adultos'
+                        : incorporatedSuccess
+                        ? '¡Incorporado con éxito!'
+                        : 'Incorporar al Plantel'}
+                    </span>
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -393,13 +633,15 @@ export const PuppyDetailModal: React.FC<PuppyDetailModalProps> = ({ puppy, onClo
                   </p>
                 </div>
 
-                <button
-                  onClick={() => setShowAddWeight((prev) => !prev)}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Registrar Pesaje</span>
-                </button>
+                {!isReadOnly && (
+                  <button
+                    onClick={() => setShowAddWeight((prev) => !prev)}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Registrar Pesaje</span>
+                  </button>
+                )}
               </div>
 
               {/* Form add weight */}
@@ -478,7 +720,7 @@ export const PuppyDetailModal: React.FC<PuppyDetailModalProps> = ({ puppy, onClo
                   {(puppy.pesajes || []).map((p, idx) => (
                     <tr key={idx} className="hover:bg-slate-50">
                       <td className="p-2 font-bold text-slate-900">Semana {p.semana}</td>
-                      <td className="p-2 font-mono text-slate-600">{p.fecha}</td>
+                      <td className="p-2 font-mono text-slate-600">{formatDateDMY(p.fecha)}</td>
                       <td className="p-2 font-mono text-emerald-700 font-bold">{p.pesoGramos} g</td>
                       <td className="p-2 font-mono text-slate-700">{(p.pesoGramos / 1000).toFixed(2)} kg</td>
                     </tr>
@@ -505,7 +747,7 @@ export const PuppyDetailModal: React.FC<PuppyDetailModalProps> = ({ puppy, onClo
                         <strong className="text-slate-900">{v.vacuna}</strong>
                         <div className="text-[10px] text-slate-500">{v.veterinario}</div>
                       </div>
-                      <span className="font-mono text-blue-700 font-bold">{v.fecha}</span>
+                      <span className="font-mono text-blue-700 font-bold">{formatDateDMY(v.fecha)}</span>
                     </div>
                   ))}
                   {(puppy.vacunas || []).length === 0 && (
@@ -521,7 +763,7 @@ export const PuppyDetailModal: React.FC<PuppyDetailModalProps> = ({ puppy, onClo
                         <strong className="text-slate-900">{d.producto}</strong>
                         <div className="text-[10px] text-slate-500">Dosis: {d.dosis}</div>
                       </div>
-                      <span className="font-mono text-emerald-700 font-bold">{d.fecha}</span>
+                      <span className="font-mono text-emerald-700 font-bold">{formatDateDMY(d.fecha)}</span>
                     </div>
                   ))}
                 </div>
@@ -564,7 +806,7 @@ export const PuppyDetailModal: React.FC<PuppyDetailModalProps> = ({ puppy, onClo
                     </div>
                     <div>
                       <span className="text-[10px] text-slate-500 block">Fecha Entrega Estimada</span>
-                      <span className="font-mono text-amber-700">{puppy.comprador.fechaEntregaEstimada}</span>
+                      <span className="font-mono text-amber-700">{formatDateDMY(puppy.comprador.fechaEntregaEstimada)}</span>
                     </div>
                     <div>
                       <span className="text-[10px] text-slate-500 block">Seña Abonada</span>
@@ -584,7 +826,20 @@ export const PuppyDetailModal: React.FC<PuppyDetailModalProps> = ({ puppy, onClo
         </div>
 
         {/* Footer */}
-        <div className="p-3 bg-slate-50 border-t border-slate-200 flex justify-end">
+        <div className="p-3 bg-slate-50 border-t border-slate-200 flex justify-between items-center">
+          <div>
+            {!isReadOnly && onEdit && (
+              <button
+                onClick={() => {
+                  onClose();
+                  onEdit();
+                }}
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold cursor-pointer shadow-xs"
+              >
+                Editar Ficha
+              </button>
+            )}
+          </div>
           <button
             onClick={onClose}
             className="px-4 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-semibold cursor-pointer"

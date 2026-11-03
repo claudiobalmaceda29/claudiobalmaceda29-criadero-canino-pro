@@ -69,27 +69,27 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
-    // Ejemplares: strictly scoped to the breeder's criadero
+    // Ejemplares: globally readable in read-only mode, writes restricted to owner criadero
     match /ejemplares/{ejemplarId} {
-      allow get: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+      allow get: if isSignedIn();
       allow list: if isSignedIn();
       allow create: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(request.resource.data.criaderoId));
       allow update: if isSignedIn() && (isSuperAdmin() || (canAccessCriadero(resource.data.criaderoId) && canAccessCriadero(request.resource.data.criaderoId)));
       allow delete: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
     }
 
-    // Camadas: strictly scoped to the breeder's criadero
+    // Camadas: globally readable in read-only mode, writes restricted to owner criadero
     match /camadas/{camadaId} {
-      allow get: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+      allow get: if isSignedIn();
       allow list: if isSignedIn();
       allow create: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(request.resource.data.criaderoId));
       allow update: if isSignedIn() && (isSuperAdmin() || (canAccessCriadero(resource.data.criaderoId) && canAccessCriadero(request.resource.data.criaderoId)));
       allow delete: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
     }
 
-    // Cachorros: strictly scoped to the breeder's criadero
+    // Cachorros: globally readable in read-only mode, writes restricted to owner criadero
     match /cachorros/{cachorroId} {
-      allow get: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+      allow get: if isSignedIn();
       allow list: if isSignedIn();
       allow create: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(request.resource.data.criaderoId));
       allow update: if isSignedIn() && (isSuperAdmin() || (canAccessCriadero(resource.data.criaderoId) && canAccessCriadero(request.resource.data.criaderoId)));

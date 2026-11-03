@@ -13,37 +13,76 @@ import {
   Heart,
   ChevronRight,
   Sparkles,
+  Trash2,
+  AlertTriangle,
+  Loader2,
+  Archive,
+  RotateCcw,
+  History,
 } from 'lucide-react';
 import { DogDetailModal } from './DogDetailModal';
 import { DogFormModal } from './DogFormModal';
-import { calculateDogAge } from '../../lib/dogUtils';
+import { calculateDogAge, formatDateDMY } from '../../lib/dogUtils';
 
 export const DogsListView: React.FC = () => {
-  const { ejemplares, currentCriadero, exportToCSV, openPrintModal } = useApp();
+  const { ejemplares, currentCriadero, exportToCSV, openPrintModal, deleteEjemplar, reactivarEjemplar } = useApp();
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterScope, setFilterScope] = useState<'PLANTEL' | 'EXTERNOS' | 'RETIRADOS' | 'TODOS'>('PLANTEL');
   const [filterSex, setFilterSex] = useState<string>('TODOS');
   const [filterState, setFilterState] = useState<string>('TODOS');
   const [selectedDog, setSelectedDog] = useState<Ejemplar | null>(null);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingDog, setEditingDog] = useState<Ejemplar | null>(null);
+  const [dogToDelete, setDogToDelete] = useState<Ejemplar | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isReactivatingId, setIsReactivatingId] = useState<string | null>(null);
+
+  const isDogRetired = (d: Ejemplar) => d.estado === 'RETIRADO' || d.activoEnPlantel === false;
+
+  const plantelCount = useMemo(
+    () => ejemplares.filter((d) => d.esDelPlantel !== false && !d.esExterno && !isDogRetired(d)).length,
+    [ejemplares]
+  );
+  const externosCount = useMemo(
+    () => ejemplares.filter((d) => (d.esDelPlantel === false || d.esExterno) && !isDogRetired(d)).length,
+    [ejemplares]
+  );
+  const retiradosCount = useMemo(
+    () => ejemplares.filter((d) => isDogRetired(d)).length,
+    [ejemplares]
+  );
 
   const filteredDogs = useMemo(() => {
-    return ejemplares.filter((dog) => {
-      const q = searchTerm.toLowerCase();
-      const matchesSearch =
-        dog.nombreCompleto.toLowerCase().includes(q) ||
-        dog.afijo.toLowerCase().includes(q) ||
-        dog.numeroPOA?.toLowerCase().includes(q) ||
-        dog.microchip?.toLowerCase().includes(q) ||
-        dog.color?.toLowerCase().includes(q);
+    return ejemplares
+      .filter((dog) => {
+        const isExterno = dog.esDelPlantel === false || dog.esExterno;
+        const isRetired = isDogRetired(dog);
 
-      const matchesSex = filterSex === 'TODOS' || dog.sexo === filterSex;
-      const matchesState = filterState === 'TODOS' || dog.estado === filterState;
+        if (filterScope === 'PLANTEL' && (isExterno || isRetired)) return false;
+        if (filterScope === 'EXTERNOS' && (!isExterno || isRetired)) return false;
+        if (filterScope === 'RETIRADOS' && !isRetired) return false;
 
-      return matchesSearch && matchesSex && matchesState;
-    });
-  }, [ejemplares, searchTerm, filterSex, filterState]);
+        const q = searchTerm.toLowerCase();
+        const matchesSearch =
+          dog.nombreCompleto.toLowerCase().includes(q) ||
+          dog.afijo.toLowerCase().includes(q) ||
+          dog.numeroPOA?.toLowerCase().includes(q) ||
+          dog.microchip?.toLowerCase().includes(q) ||
+          dog.color?.toLowerCase().includes(q);
+
+        const matchesSex = filterSex === 'TODOS' || dog.sexo === filterSex;
+        const matchesState = filterState === 'TODOS' || dog.estado === filterState;
+
+        return matchesSearch && matchesSex && matchesState;
+      })
+      .sort((a, b) =>
+        (a.nombreCompleto || '').localeCompare(b.nombreCompleto || '', undefined, {
+          numeric: true,
+          sensitivity: 'base',
+        })
+      );
+  }, [ejemplares, filterScope, searchTerm, filterSex, filterState]);
 
   const handleExportCSV = () => {
     const rows = filteredDogs.map((d) => ({
@@ -108,6 +147,82 @@ export const DogsListView: React.FC = () => {
             <span>Nuevo Ejemplar</span>
           </button>
         </div>
+      </div>
+
+      {/* Scope Selector: Plantel Oficial vs Ejemplares Externos */}
+      <div className="flex items-center gap-2 border-b border-slate-200/90 dark:border-slate-800 pb-2 flex-wrap">
+        <button
+          type="button"
+          onClick={() => setFilterScope('PLANTEL')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+            filterScope === 'PLANTEL'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800'
+          }`}
+        >
+          <Dog className="w-3.5 h-3.5" />
+          <span>Plantel Oficial</span>
+          <span
+            className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+              filterScope === 'PLANTEL' ? 'bg-blue-700 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+            }`}
+          >
+            {plantelCount}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setFilterScope('EXTERNOS')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+            filterScope === 'EXTERNOS'
+              ? 'bg-amber-600 text-white shadow-xs'
+              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800'
+          }`}
+        >
+          <Award className="w-3.5 h-3.5" />
+          <span>Ejemplares Externos</span>
+          <span
+            className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+              filterScope === 'EXTERNOS' ? 'bg-amber-700 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+            }`}
+          >
+            {externosCount}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setFilterScope('RETIRADOS')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+            filterScope === 'RETIRADOS'
+              ? 'bg-purple-600 text-white shadow-xs'
+              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800'
+          }`}
+        >
+          <Archive className="w-3.5 h-3.5" />
+          <span>Retirados / Histórico</span>
+          <span
+            className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+              filterScope === 'RETIRADOS' ? 'bg-purple-700 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+            }`}
+          >
+            {retiradosCount}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setFilterScope('TODOS')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+            filterScope === 'TODOS'
+              ? 'bg-slate-800 text-white dark:bg-slate-700 shadow-xs'
+              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800'
+          }`}
+        >
+          <span>Todos</span>
+          <span className="font-mono text-[10px]">({ejemplares.length})</span>
+        </button>
       </div>
 
       {/* Filter and Search Bar */}
@@ -213,6 +328,16 @@ export const DogsListView: React.FC = () => {
                         Gestante
                       </span>
                     )}
+                    {(dog.esDelPlantel === false || dog.esExterno) && (
+                      <span className="ml-1 px-1.5 py-0.2 rounded-full bg-amber-500/90 text-slate-950 font-black text-[9px] uppercase tracking-wider">
+                        Externo
+                      </span>
+                    )}
+                    {isDogRetired(dog) && (
+                      <span className="ml-1 px-1.5 py-0.2 rounded-full bg-purple-600 text-white font-black text-[9px] uppercase tracking-wider">
+                        Retirado
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-1.5">
@@ -244,7 +369,7 @@ export const DogsListView: React.FC = () => {
               <div className="p-4 space-y-3 text-xs">
                 {/* Age & Birth Date */}
                 <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 pb-1 border-b border-slate-100 dark:border-slate-800">
-                  <span>Nac: <strong className="text-slate-700 dark:text-slate-300">{dog.fechaNacimiento}</strong></span>
+                  <span>Nac: <strong className="text-slate-700 dark:text-slate-300">{formatDateDMY(dog.fechaNacimiento)}</strong></span>
                   <span className="text-blue-600 dark:text-blue-400 font-bold">
                     Edad: {calculateDogAge(dog.fechaNacimiento).text}
                   </span>
@@ -310,6 +435,38 @@ export const DogsListView: React.FC = () => {
                 >
                   Editar
                 </button>
+                {isDogRetired(dog) ? (
+                  <button
+                    onClick={async () => {
+                      try {
+                        setIsReactivatingId(dog.id);
+                        await reactivarEjemplar(dog.id);
+                      } catch (err) {
+                        console.error('Error reactivando ejemplar:', err);
+                      } finally {
+                        setIsReactivatingId(null);
+                      }
+                    }}
+                    disabled={isReactivatingId === dog.id}
+                    className="px-2.5 py-1.5 rounded-lg text-xs bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 font-bold transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    title="Reactivar ejemplar en el plantel oficial"
+                  >
+                    {isReactivatingId === dog.id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <RotateCcw className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                    )}
+                    <span>Reactivar</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setDogToDelete(dog)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950/40 transition-colors cursor-pointer"
+                    title="Retirar ejemplar del plantel (Soft Delete - Conserva historial)"
+                  >
+                    <Archive className="w-4 h-4" />
+                  </button>
+                )}
               </div>
 
               <button
@@ -331,8 +488,91 @@ export const DogsListView: React.FC = () => {
             No se encontraron ejemplares
           </h3>
           <p className="text-xs text-slate-400 mt-1">
-            Intenta con otro término de búsqueda o limpia los filtros seleccionados.
+            Intenta con otro término de búsqueda o cambia la pestaña seleccionada.
           </p>
+        </div>
+      )}
+
+      {/* Confirmation Modal to Retire (Soft Delete) Ejemplar */}
+      {dogToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-full bg-purple-50 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-800">
+                <Archive className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  ¿Retirar ejemplar del plantel activo?
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Borrado Lógico (Soft Delete) seguro en Firestore.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 space-y-1 text-xs">
+              <div className="font-bold text-slate-800 dark:text-slate-100 text-sm">
+                {dogToDelete.nombreCompleto}
+              </div>
+              <div className="text-slate-500 dark:text-slate-400 flex flex-wrap gap-2">
+                <span>{dogToDelete.sexo === 'MACHO' ? 'Padrillo' : 'Madre'}</span>
+                {dogToDelete.numeroPOA && <span>• POA: {dogToDelete.numeroPOA}</span>}
+                {dogToDelete.tatuaje && <span>• TAT: {dogToDelete.tatuaje}</span>}
+              </div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/50 text-[11px] text-blue-900 dark:text-blue-200 space-y-1">
+              <p className="font-semibold">
+                🛡️ <strong>Trazabilidad 100% Garantizada:</strong>
+              </p>
+              <p>
+                El perro dejará de figurar en el Plantel Activo pero <strong>no se borrará su documento</strong>. Todas sus camadas, cachorros, genealogías, pesajes semanales y controles sanitarios permanecerán intactos y vinculados.
+              </p>
+              <p className="text-[10px] text-blue-700 dark:text-blue-300">
+                Podrás consultar su ficha o reactivarlo en cualquier momento desde la pestaña <em>"Retirados / Histórico"</em>.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setDogToDelete(null)}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 font-bold text-xs transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={async () => {
+                  try {
+                    setIsDeleting(true);
+                    await deleteEjemplar(dogToDelete.id, 'Retirado a sección histórica');
+                  } catch (err) {
+                    console.error('Error al retirar ejemplar:', err);
+                  } finally {
+                    setIsDeleting(false);
+                    setDogToDelete(null);
+                  }
+                }}
+                className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Retirando...</span>
+                  </>
+                ) : (
+                  <>
+                    <Archive className="w-3.5 h-3.5" />
+                    <span>Confirmar Retiro (Conservar Historial)</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

@@ -122,7 +122,11 @@ export interface Ejemplar {
   enfermedadesCronicas?: string;
   medicacionActual?: string;
   observaciones: string;
+  esDelPlantel?: boolean; // true si pertenece al plantel del criadero, false si es macho/ejemplar externo
   esExterno?: boolean; // Padrillo de terceros contratado
+  activoEnPlantel?: boolean; // true si está activo en el plantel, false si fue retirado/archivado (Borrado lógico)
+  fechaRetiro?: string; // Fecha en que pasó a retirado/histórico
+  motivoRetiro?: string; // Motivo o nota del retiro del plantel
   createdAt: string;
 }
 
@@ -141,6 +145,10 @@ export interface RegistroSanitario {
   resultado?: string;
   esDocumentadoOficial?: boolean;
   observaciones?: string;
+  adjuntoUrl?: string; // Enlace persistente al PDF o imagen del certificado / estudio
+  adjuntoNombre?: string;
+  adjuntoTipo?: 'PDF' | 'IMAGEN';
+  adjuntoSize?: string;
 }
 
 export interface Monta {
@@ -231,8 +239,21 @@ export interface Camada {
   identificador: string; // ej: "Camada 'A' 2026"
   padreId: string;
   padreNombre: string;
+  padreFechaNacimiento?: string;
+  padreTatuaje?: string;
+  padreNumeroPOA?: string;
+  padreMicrochip?: string;
+  padrePelo?: 'CORTO' | 'LARGO' | 'MEDIO';
+  padreEsExterno?: boolean;
+
   madreId: string;
   madreNombre: string;
+  madreFechaNacimiento?: string;
+  madreTatuaje?: string;
+  madreNumeroPOA?: string;
+  madreMicrochip?: string;
+  madrePelo?: 'CORTO' | 'LARGO' | 'MEDIO';
+  madreEsExterna?: boolean;
 
   // Datos prenatales (estimaciones y ecografías previas al parto)
   partoConfirmado?: boolean;
@@ -275,6 +296,7 @@ export interface Cachorro {
   madreId: string;
   madreNombre: string;
   nombre?: string;
+  nombreDefinitivo?: string;
   identificadorProvisorio: string;
   sexo: Sexo;
   
@@ -283,7 +305,10 @@ export interface Cachorro {
   fechaNacimiento?: string; // Solo cuando ya nació
   color: string;
   colorCollar?: string;
+  nombreColorCollar?: string;
   numeroPOA?: string;
+  tatuaje?: string;
+  pelo?: 'CORTO' | 'LARGO' | 'MEDIO' | string;
   microchip?: string;
   pesoNacimientoGramos?: number; // Solo cuando ya nació
   pesajes: PesajeCachorro[];

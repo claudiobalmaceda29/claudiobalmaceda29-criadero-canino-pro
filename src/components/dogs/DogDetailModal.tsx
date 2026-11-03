@@ -27,10 +27,16 @@ import {
   FileCheck2,
   CheckCircle2,
   Loader2,
+  Lock,
+  Sparkles,
+  Plus,
+  Archive,
+  RotateCcw,
 } from 'lucide-react';
 import { DocumentPreviewModal } from '../common/DocumentPreviewModal';
-import { calculateDogAge } from '../../lib/dogUtils';
-import { parsePedigreeFile } from '../../lib/pdfPedigreeParser';
+import { DogFormModal } from './DogFormModal';
+import { calculateDogAge, formatDateDMY } from '../../lib/dogUtils';
+import { persistPedigreeDocument } from '../../lib/documentStorage';
 
 interface DogDetailModalProps {
   dog: Ejemplar;
@@ -43,14 +49,18 @@ export const DogDetailModal: React.FC<DogDetailModalProps> = ({ dog, onClose, on
     montas,
     camadas,
     exposiciones,
+    registrosSanitarios,
+    addRegistroSanitario,
+    deleteRegistroSanitario,
     deleteEjemplar,
+    retirarEjemplar,
+    reactivarEjemplar,
     updateEjemplar,
     openPrintModal,
     ejemplares,
     currentUser,
     currentCriaderoId,
     currentCriadero,
-    extractPedigreeFromPDF,
   } = useApp();
 
   const [currentDog, setCurrentDog] = useState<Ejemplar>(dog);
@@ -58,21 +68,77 @@ export const DogDetailModal: React.FC<DogDetailModalProps> = ({ dog, onClose, on
   const [activeTab, setActiveTab] = useState<'RESUMEN' | 'PEDIGREE' | 'SANIDAD' | 'REPRO' | 'EXPO'>('RESUMEN');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
-  const [isExtractingPdf, setIsExtractingPdf] = useState(false);
-  const [extractionMessage, setExtractionMessage] = useState<string | null>(null);
-  const [extractionError, setExtractionError] = useState<string | null>(null);
+  const [isCloningModalOpen, setIsCloningModalOpen] = useState(false);
+  const [isReactivating, setIsReactivating] = useState(false);
+
+  // Pedigree document upload states
+  const [isUploadingPedigree, setIsUploadingPedigree] = useState(false);
+  const [pedigreeUploadProgress, setPedigreeUploadProgress] = useState<string | null>(null);
+  const [pedigreeFeedback, setPedigreeFeedback] = useState<string | null>(null);
+  const [pedigreeError, setPedigreeError] = useState<string | null>(null);
+
+  const handleUploadPedigreeFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    try {
+      setIsUploadingPedigree(true);
+      setPedigreeUploadProgress('Subiendo archivo oficial a almacenamiento seguro...');
+      setPedigreeFeedback(null);
+      setPedigreeError(null);
+
+      const persisted = await persistPedigreeDocument(
+        file,
+        currentDog.nombreCompleto || currentDog.id,
+        (pct, text) => setPedigreeUploadProgress(text)
+      );
+
+      const pedigreeUpdates: Partial<Ejemplar> = {
+        pedigreeDocUrl: persisted.url,
+        pedigreeDocNombre: persisted.docNombre,
+        pedigreeDocTipo: persisted.docTipo,
+        pedigreeDocFecha: new Date().toISOString().split('T')[0],
+        pedigreeDocSize: persisted.sizeStr,
+      };
+
+      await updateEjemplar(currentDog.id, pedigreeUpdates);
+      setCurrentDog((prev) => ({ ...prev, ...pedigreeUpdates }));
+      setPedigreeFeedback('¡Documento de Pedigree físico guardado exitosamente en Firestore!');
+    } catch (err: any) {
+      console.error('Error guardando documento de pedigree:', err);
+      setPedigreeError('No se pudo guardar el documento de pedigree. Intente nuevamente.');
+    } finally {
+      setIsUploadingPedigree(false);
+      setPedigreeUploadProgress(null);
+    }
+  };
+
+  // Health modal and form states
+  const [isAddingSanitaryRecord, setIsAddingSanitaryRecord] = useState(false);
+  const [newSanTipo, setNewSanTipo] = useState<'VACUNA' | 'DESPARASITACION' | 'ESTUDIO' | 'CONTROL'>('VACUNA');
+  const [newSanNombre, setNewSanNombre] = useState('');
+  const [newSanFecha, setNewSanFecha] = useState(new Date().toISOString().split('T')[0]);
+  const [newSanProxFecha, setNewSanProxFecha] = useState('');
+  const [newSanDosis, setNewSanDosis] = useState('');
+  const [newSanVet, setNewSanVet] = useState('Dr. Fernando Soria (MP 4921)');
+  const [newSanObs, setNewSanObs] = useState('');
+  const [sanitaryFeedback, setSanitaryFeedback] = useState<string | null>(null);
 
   useEffect(() => {
     setCurrentDog(dog);
     setDogHistory([]);
-    setExtractionMessage(null);
-    setExtractionError(null);
   }, [dog]);
 
   const isSuperAdmin =
     currentUser.rol === 'SUPER_ADMIN' ||
     currentUser.email?.toLowerCase() === 'claudiobalmaceda.ok@gmail.com';
-  const canEditDog = isSuperAdmin || currentDog.criaderoId === currentCriaderoId;
+  const isOwnerDog =
+    currentDog.criaderoId === currentCriaderoId ||
+    (currentUser?.id && currentDog.criaderoId === currentUser.id) ||
+    ((currentUser as any)?.uid && currentDog.criaderoId === (currentUser as any).uid);
+  const canEditDog = isSuperAdmin || isOwnerDog;
+  const isExternalDogFromOther = !canEditDog && (currentDog.esDelPlantel === false || currentDog.esExterno === true);
 
   // Associated matings
   const dogMontas = montas.filter((m) => m.machoId === currentDog.id || m.hembraId === currentDog.id);
@@ -115,102 +181,7 @@ export const DogDetailModal: React.FC<DogDetailModalProps> = ({ dog, onClose, on
     setCurrentDog(previous);
   };
 
-  // Pedigree document upload handler with OCR and 4-generation extraction
-  const handleUploadPedigreeDoc = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-    setIsExtractingPdf(true);
-    setExtractionMessage(null);
-    setExtractionError(null);
 
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      if (!ev.target?.result) {
-        setIsExtractingPdf(false);
-        setExtractionError('No se pudo leer el archivo seleccionado.');
-        return;
-      }
-
-      const base64Data = ev.target.result as string;
-      const baseUpdates: Partial<Ejemplar> = {
-        pedigreeDocUrl: base64Data,
-        pedigreeDocNombre: file.name,
-        pedigreeDocTipo: isPdf ? 'PDF' : 'IMAGEN',
-        pedigreeDocFecha: new Date().toISOString().split('T')[0],
-        pedigreeDocSize: `${(file.size / 1024).toFixed(0)} KB`,
-      };
-
-      // Save the attached document immediately
-      await updateEjemplar(currentDog.id, baseUpdates);
-      setCurrentDog((prev) => ({ ...prev, ...baseUpdates }));
-
-      // Now perform automatic pedigree OCR extraction
-      try {
-        const res = await parsePedigreeFile(file, ejemplares);
-        if (res.success && res.data) {
-          const data = res.data;
-          const lineageUpdates: Partial<Ejemplar> = {};
-
-          if (data.padre?.nombre) {
-            lineageUpdates.padreNombre = data.padre.nombre;
-            if (res.matchedFather) {
-              lineageUpdates.padreId = res.matchedFather.id;
-            }
-          }
-          if (data.madre?.nombre) {
-            lineageUpdates.madreNombre = data.madre.nombre;
-            if (res.matchedMother) {
-              lineageUpdates.madreId = res.matchedMother.id;
-            }
-          }
-          if (data.abueloPaterno?.nombre) lineageUpdates.abueloPaterno = data.abueloPaterno.nombre;
-          if (data.abuelaPaterna?.nombre) lineageUpdates.abuelaPaterna = data.abuelaPaterna.nombre;
-          if (data.abueloMaterno?.nombre) lineageUpdates.abueloMaterno = data.abueloMaterno.nombre;
-          if (data.abuelaMaterna?.nombre) lineageUpdates.abuelaMaterna = data.abuelaMaterna.nombre;
-          if (data.bisabuelos) {
-            lineageUpdates.bisabuelos = {
-              ...(currentDog.bisabuelos || {}),
-              ...data.bisabuelos,
-            };
-          }
-
-          if (data.sujeto?.numeroPOA && !currentDog.numeroPOA) {
-            lineageUpdates.numeroPOA = data.sujeto.numeroPOA;
-          }
-
-          const fullUpdates = { ...baseUpdates, ...lineageUpdates };
-          await updateEjemplar(currentDog.id, fullUpdates);
-          setCurrentDog((prev) => ({ ...prev, ...fullUpdates }));
-
-          const count = res.ancestorsCount || data.conteoAntepasadosIdentificados || 0;
-          setExtractionMessage(
-            `¡Genealogía extraída con éxito! Se autocompletaron ${count} antepasados del pedigree oficial (${file.name}).`
-          );
-        } else {
-          setExtractionMessage('Documento adjuntado exitosamente. No se detectaron antepasados adicionales.');
-        }
-      } catch (err: any) {
-        console.error('Error extracting pedigree:', err);
-        setExtractionError('Documento adjunto guardado, pero ocurrió un problema al extraer el texto OCR.');
-      } finally {
-        setIsExtractingPdf(false);
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleRemovePedigreeDoc = () => {
-    const updates: Partial<Ejemplar> = {
-      pedigreeDocUrl: undefined,
-      pedigreeDocNombre: undefined,
-      pedigreeDocTipo: undefined,
-      pedigreeDocFecha: undefined,
-      pedigreeDocSize: undefined,
-    };
-    updateEjemplar(currentDog.id, updates);
-    setCurrentDog((prev) => ({ ...prev, ...updates }));
-  };
 
   // Helper to render an ancestor node (clickable if in system, plain text if not)
   const renderAncestorNode = (label: string, name?: string, explicitId?: string, isDirectParent: boolean = false) => {
@@ -350,6 +321,17 @@ export const DogDetailModal: React.FC<DogDetailModalProps> = ({ dog, onClose, on
           </div>
 
           <div className="flex items-center gap-2">
+            {isExternalDogFromOther && (
+              <button
+                type="button"
+                onClick={() => setIsCloningModalOpen(true)}
+                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                title="Clonar / agregar este ejemplar externo a tu plantel para utilizarlo en tus montas y camadas"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Agregar a mi plantel</span>
+              </button>
+            )}
             {currentDog.pedigreeDocUrl && (
               <button
                 onClick={() => setIsPreviewOpen(true)}
@@ -386,6 +368,31 @@ export const DogDetailModal: React.FC<DogDetailModalProps> = ({ dog, onClose, on
           </div>
         </div>
 
+        {/* Read-Only Mode Banner */}
+        {!canEditDog && (
+          <div className="px-4 py-2.5 bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200 dark:border-amber-900 text-amber-900 dark:text-amber-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="p-1 rounded bg-amber-100 dark:bg-amber-900 text-amber-800 dark:text-amber-300">
+                <Lock className="w-3.5 h-3.5" />
+              </span>
+              <span>
+                <strong>Modo Solo Lectura:</strong> Este ejemplar pertenece a otro criadero registrado en la red.
+              </span>
+            </div>
+            {isExternalDogFromOther && (
+              <button
+                type="button"
+                onClick={() => setIsCloningModalOpen(true)}
+                className="px-3 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer shrink-0"
+                title="Clonar / agregar este ejemplar externo a tu plantel"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>Agregar a mi plantel</span>
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Navigation Tabs */}
         <div className="flex items-center px-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 overflow-x-auto text-xs">
           {[
@@ -416,136 +423,9 @@ export const DogDetailModal: React.FC<DogDetailModalProps> = ({ dog, onClose, on
 
         {/* Tab Body */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100">
-          {/* Extraction status and confirmation alerts */}
-          {isExtractingPdf && (
-            <div className="p-3.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 text-blue-900 dark:text-blue-200 flex items-center gap-2.5">
-              <Loader2 className="w-4 h-4 text-blue-600 animate-spin shrink-0" />
-              <div>
-                <strong className="block font-bold">Extrayendo genealogía con IA y OCR...</strong>
-                <span className="text-[11px] text-blue-700 dark:text-blue-300">
-                  Analizando el PDF de pedigree y mapeando los antepasados de las 4 generaciones.
-                </span>
-              </div>
-            </div>
-          )}
-
-          {extractionMessage && (
-            <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span className="font-bold text-xs">{extractionMessage}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setExtractionMessage(null)}
-                className="text-emerald-700 dark:text-emerald-300 hover:text-emerald-900 text-xs font-bold px-1 cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-          )}
-
-          {extractionError && (
-            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 flex items-center gap-2 font-medium">
-              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-              <span>{extractionError}</span>
-            </div>
-          )}
-
           {/* TAB 1: RESUMEN */}
           {activeTab === 'RESUMEN' && (
             <div className="space-y-5">
-              {/* Pedigree Document Card (PDF / Image) */}
-              <div className="p-4 rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 shadow-xs space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <div className="p-2.5 rounded-xl bg-blue-50 text-blue-700 border border-blue-200">
-                      <FileText className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-bold text-slate-900 text-sm">Documento de Pedigree Oficial</h4>
-                        {currentDog.pedigreeDocUrl && (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 uppercase">
-                            {currentDog.pedigreeDocTipo || 'PDF'}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-slate-500">
-                        Certificado oficial de pedigree digital / escaneado del ejemplar registrado ante el Club POA
-                      </p>
-                    </div>
-                  </div>
-
-                  {currentDog.pedigreeDocUrl && (
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setIsPreviewOpen(true)}
-                        className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition-colors"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        <span>Ver Pedigree</span>
-                      </button>
-                      <a
-                        href={currentDog.pedigreeDocUrl}
-                        download={currentDog.pedigreeDocNombre || `pedigree-${currentDog.nombreCompleto.replace(/\s+/g, '_')}.${currentDog.pedigreeDocTipo === 'IMAGEN' ? 'jpg' : 'pdf'}`}
-                        className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs flex items-center gap-1.5 border border-slate-200 shadow-xs cursor-pointer transition-colors"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Descargar</span>
-                      </a>
-                    </div>
-                  )}
-                </div>
-
-                {currentDog.pedigreeDocUrl ? (
-                  <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                    <div className="flex items-center gap-2 truncate">
-                      <span className="text-slate-500 font-medium">Archivo:</span>
-                      <strong className="text-slate-900 truncate">{currentDog.pedigreeDocNombre || 'pedigree_oficial.pdf'}</strong>
-                      <span className="text-slate-400">•</span>
-                      <span className="text-slate-500 text-[11px]">{currentDog.pedigreeDocFecha || 'Registrado'}</span>
-                      {currentDog.pedigreeDocSize && (
-                        <>
-                          <span className="text-slate-400">•</span>
-                          <span className="text-slate-500 text-[11px]">{currentDog.pedigreeDocSize}</span>
-                        </>
-                      )}
-                    </div>
-
-                    {canEditDog && (
-                      <div className="flex items-center gap-2 shrink-0">
-                        <label className="text-blue-600 hover:text-blue-800 font-semibold cursor-pointer text-xs">
-                          Reemplazar
-                          <input type="file" accept=".pdf,image/*" className="hidden" onChange={handleUploadPedigreeDoc} />
-                        </label>
-                        <span className="text-slate-300">|</span>
-                        <button
-                          type="button"
-                          onClick={handleRemovePedigreeDoc}
-                          className="text-rose-600 hover:text-rose-800 font-semibold cursor-pointer text-xs"
-                        >
-                          Eliminar
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  canEditDog && (
-                    <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                      <span className="text-slate-600 text-[11px]">
-                        No hay archivo de pedigree adjunto todavía. Podés subir el PDF o foto escaneada oficial.
-                      </span>
-                      <label className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer shrink-0 shadow-xs">
-                        <Upload className="w-3.5 h-3.5" />
-                        <span>Subir Pedigree (PDF o Imagen)</span>
-                        <input type="file" accept=".pdf,image/*" className="hidden" onChange={handleUploadPedigreeDoc} />
-                      </label>
-                    </div>
-                  )
-                )}
-              </div>
 
               {/* Photo & Identity grid */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -578,7 +458,7 @@ export const DogDetailModal: React.FC<DogDetailModalProps> = ({ dog, onClose, on
                     <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 shadow-xs">
                       <span className="text-[10px] uppercase font-bold text-slate-500 block">Fecha Nacimiento</span>
                       <strong className="text-slate-900 font-semibold text-xs">
-                        {currentDog.fechaNacimiento} ({calculateDogAge(currentDog.fechaNacimiento).text})
+                        {formatDateDMY(currentDog.fechaNacimiento)} ({calculateDogAge(currentDog.fechaNacimiento).text})
                       </strong>
                     </div>
                     <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 shadow-xs">
@@ -692,23 +572,6 @@ export const DogDetailModal: React.FC<DogDetailModalProps> = ({ dog, onClose, on
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {currentDog.pedigreeDocUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setIsPreviewOpen(true)}
-                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold inline-flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                      <span>Ver Pedigree Adjunto</span>
-                    </button>
-                  )}
-                  {canEditDog && !currentDog.pedigreeDocUrl && (
-                    <label className="px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs">
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>Subir Pedigree</span>
-                      <input type="file" accept=".pdf,image/*" className="hidden" onChange={handleUploadPedigreeDoc} />
-                    </label>
-                  )}
                   {currentDog.pedigreeDatabaseUrl && (
                     <a
                       href={currentDog.pedigreeDatabaseUrl.startsWith('http') ? currentDog.pedigreeDatabaseUrl : `https://${currentDog.pedigreeDatabaseUrl}`}
@@ -732,74 +595,189 @@ export const DogDetailModal: React.FC<DogDetailModalProps> = ({ dog, onClose, on
                 </div>
               </div>
 
-              {/* 4 Generation Interactive Chart */}
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs overflow-x-auto shadow-xs">
-                <div className="min-w-[760px] space-y-4">
-                  {/* SIRE BRANCH (PADRE) */}
-                  <div className="p-4 rounded-xl bg-blue-50/50 border border-blue-200 space-y-3">
-                    <div className="flex items-center justify-between border-b border-blue-100 pb-1.5">
-                      <span className="text-xs font-black uppercase tracking-wider text-blue-800 flex items-center gap-1.5">
-                        <Award className="w-4 h-4 text-blue-600" />
-                        Línea Paterna (Padre y Antepasados)
-                      </span>
-                      <span className="text-[10px] text-blue-600 font-semibold">Generaciones I, II y III</span>
+              {/* Documento de Pedigree Físico Adjunto (PDF o Imagen) */}
+              <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 shadow-xs space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800 shrink-0">
+                      <FileCheck2 className="w-5 h-5" />
                     </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      {/* Father (1st Gen) */}
-                      <div className="flex flex-col justify-center">
-                        {renderAncestorNode('PADRE', currentDog.padreNombre, currentDog.padreId, true)}
-                      </div>
-
-                      {/* Grandparents (2nd Gen) */}
-                      <div className="space-y-2">
-                        {renderAncestorNode('ABUELO PATERNO', currentDog.abueloPaterno)}
-                        {renderAncestorNode('ABUELA PATERNA', currentDog.abuelaPaterna)}
-                      </div>
-
-                      {/* Great-Grandparents (3rd Gen) */}
-                      <div className="space-y-1.5 text-[11px]">
-                        {renderAncestorNode('BISABUELO', currentDog.bisabuelos?.pp_p)}
-                        {renderAncestorNode('BISABUELA', currentDog.bisabuelos?.pp_m)}
-                        {renderAncestorNode('BISABUELO', currentDog.bisabuelos?.pm_p)}
-                        {renderAncestorNode('BISABUELA', currentDog.bisabuelos?.pm_m)}
-                      </div>
+                    <div>
+                      <h5 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                        <span>Documento de Pedigree Físico (PDF / Imagen)</span>
+                        {currentDog.pedigreeDocUrl && (
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                            Cargado
+                          </span>
+                        )}
+                      </h5>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {currentDog.pedigreeDocUrl
+                          ? `${currentDog.pedigreeDocNombre || 'Documento oficial'} • ${currentDog.pedigreeDocSize || 'Archivo adjunto'}`
+                          : 'Cargá y respaldá el pedigree oficial emitido por POA o federación canina en Firebase Storage.'}
+                      </p>
                     </div>
                   </div>
 
-                  {/* DAM BRANCH (MADRE) */}
-                  <div className="p-4 rounded-xl bg-rose-50/50 border border-rose-200 space-y-3">
-                    <div className="flex items-center justify-between border-b border-rose-100 pb-1.5">
-                      <span className="text-xs font-black uppercase tracking-wider text-rose-800 flex items-center gap-1.5">
-                        <Award className="w-4 h-4 text-rose-600" />
-                        Línea Materna (Madre y Antepasados)
-                      </span>
-                      <span className="text-[10px] text-rose-600 font-semibold">Generaciones I, II y III</span>
-                    </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {currentDog.pedigreeDocUrl && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setIsPreviewOpen(true)}
+                          className="px-3 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 text-blue-700 dark:text-blue-300 text-xs font-bold flex items-center gap-1.5 transition-colors border border-blue-200 dark:border-blue-800 cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Ver Documento</span>
+                        </button>
+                        <a
+                          href={currentDog.pedigreeDocUrl}
+                          download={currentDog.pedigreeDocNombre || `pedigree_${currentDog.nombreCompleto}.pdf`}
+                          className="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition-colors border border-slate-200 dark:border-slate-600 cursor-pointer"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Descargar</span>
+                        </a>
+                      </>
+                    )}
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      {/* Mother (1st Gen) */}
-                      <div className="flex flex-col justify-center">
-                        {renderAncestorNode('MADRE', currentDog.madreNombre, currentDog.madreId, true)}
-                      </div>
-
-                      {/* Grandparents (2nd Gen) */}
-                      <div className="space-y-2">
-                        {renderAncestorNode('ABUELO MATERNO', currentDog.abueloMaterno)}
-                        {renderAncestorNode('ABUELA MATERNA', currentDog.abuelaMaterna)}
-                      </div>
-
-                      {/* Great-Grandparents (3rd Gen) */}
-                      <div className="space-y-1.5 text-[11px]">
-                        {renderAncestorNode('BISABUELO', currentDog.bisabuelos?.mp_p)}
-                        {renderAncestorNode('BISABUELA', currentDog.bisabuelos?.mp_m)}
-                        {renderAncestorNode('BISABUELO', currentDog.bisabuelos?.mm_p)}
-                        {renderAncestorNode('BISABUELA', currentDog.bisabuelos?.mm_m)}
-                      </div>
-                    </div>
+                    {canEditDog && (
+                      <label className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>{currentDog.pedigreeDocUrl ? 'Reemplazar Pedigree' : '+ Cargar Pedigree Físico'}</span>
+                        <input
+                          type="file"
+                          accept=".pdf,image/png,image/jpeg,image/webp"
+                          onChange={handleUploadPedigreeFile}
+                          className="hidden"
+                          disabled={isUploadingPedigree}
+                        />
+                      </label>
+                    )}
                   </div>
                 </div>
+
+                {isUploadingPedigree && (
+                  <div className="p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 text-blue-900 dark:text-blue-200 text-xs flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 text-blue-600 animate-spin shrink-0" />
+                    <span>{pedigreeUploadProgress || 'Subiendo documento oficial a Firebase Storage...'}</span>
+                  </div>
+                )}
+
+                {pedigreeFeedback && (
+                  <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 text-emerald-800 dark:text-emerald-200 text-xs flex items-center justify-between">
+                    <span className="font-bold">{pedigreeFeedback}</span>
+                    <button type="button" onClick={() => setPedigreeFeedback(null)} className="text-xs font-bold text-emerald-700">✕</button>
+                  </div>
+                )}
+
+                {pedigreeError && (
+                  <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 text-rose-800 dark:text-rose-200 text-xs flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span>{pedigreeError}</span>
+                  </div>
+                )}
               </div>
+
+              {/* 4 Generation Interactive Chart */}
+              {(() => {
+                const fatherDog =
+                  (currentDog.padreId && findDogInSystem(currentDog.padreId)) ||
+                  findDogInSystem(currentDog.padreNombre);
+                const motherDog =
+                  (currentDog.madreId && findDogInSystem(currentDog.madreId)) ||
+                  findDogInSystem(currentDog.madreNombre);
+
+                const finalAbueloPaterno = currentDog.abueloPaterno || fatherDog?.padreNombre;
+                const finalAbuelaPaterna = currentDog.abuelaPaterna || fatherDog?.madreNombre;
+                const finalAbueloMaterno = currentDog.abueloMaterno || motherDog?.padreNombre;
+                const finalAbuelaMaterna = currentDog.abuelaMaterna || motherDog?.madreNombre;
+
+                const abueloPaternoDog = findDogInSystem(fatherDog?.padreId) || findDogInSystem(finalAbueloPaterno);
+                const abuelaPaternaDog = findDogInSystem(fatherDog?.madreId) || findDogInSystem(finalAbuelaPaterna);
+                const abueloMaternoDog = findDogInSystem(motherDog?.padreId) || findDogInSystem(finalAbueloMaterno);
+                const abuelaMaternaDog = findDogInSystem(motherDog?.madreId) || findDogInSystem(finalAbuelaMaterna);
+
+                const finalPpP = currentDog.bisabuelos?.pp_p || fatherDog?.bisabuelos?.pp_p || fatherDog?.abueloPaterno || abueloPaternoDog?.padreNombre;
+                const finalPpM = currentDog.bisabuelos?.pp_m || fatherDog?.bisabuelos?.pp_m || fatherDog?.abuelaPaterna || abueloPaternoDog?.madreNombre;
+                const finalPmP = currentDog.bisabuelos?.pm_p || fatherDog?.bisabuelos?.pm_p || fatherDog?.abueloMaterno || abuelaPaternaDog?.padreNombre;
+                const finalPmM = currentDog.bisabuelos?.pm_m || fatherDog?.bisabuelos?.pm_m || fatherDog?.abuelaMaterna || abuelaPaternaDog?.madreNombre;
+
+                const finalMpP = currentDog.bisabuelos?.mp_p || motherDog?.bisabuelos?.mp_p || motherDog?.abueloPaterno || abueloMaternoDog?.padreNombre;
+                const finalMpM = currentDog.bisabuelos?.mp_m || motherDog?.bisabuelos?.mp_m || motherDog?.abuelaPaterna || abueloMaternoDog?.madreNombre;
+                const finalMmP = currentDog.bisabuelos?.mm_p || motherDog?.bisabuelos?.mm_p || motherDog?.abueloMaterno || abuelaMaternaDog?.padreNombre;
+                const finalMmM = currentDog.bisabuelos?.mm_m || motherDog?.bisabuelos?.mm_m || motherDog?.abuelaMaterna || abuelaMaternaDog?.madreNombre;
+
+                return (
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs overflow-x-auto shadow-xs">
+                    <div className="min-w-[760px] space-y-4">
+                      {/* SIRE BRANCH (PADRE) */}
+                      <div className="p-4 rounded-xl bg-blue-50/50 border border-blue-200 space-y-3">
+                        <div className="flex items-center justify-between border-b border-blue-100 pb-1.5">
+                          <span className="text-xs font-black uppercase tracking-wider text-blue-800 flex items-center gap-1.5">
+                            <Award className="w-4 h-4 text-blue-600" />
+                            Línea Paterna (Padre y Antepasados)
+                          </span>
+                          <span className="text-[10px] text-blue-600 font-semibold">Generaciones I, II y III</span>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                          {/* Father (1st Gen) */}
+                          <div className="flex flex-col justify-center">
+                            {renderAncestorNode('PADRE', currentDog.padreNombre, currentDog.padreId, true)}
+                          </div>
+
+                          {/* Grandparents (2nd Gen) */}
+                          <div className="space-y-2">
+                            {renderAncestorNode('ABUELO PATERNO', finalAbueloPaterno)}
+                            {renderAncestorNode('ABUELA PATERNA', finalAbuelaPaterna)}
+                          </div>
+
+                          {/* Great-Grandparents (3rd Gen) */}
+                          <div className="space-y-1.5 text-[11px]">
+                            {renderAncestorNode('BISABUELO', finalPpP)}
+                            {renderAncestorNode('BISABUELA', finalPpM)}
+                            {renderAncestorNode('BISABUELO', finalPmP)}
+                            {renderAncestorNode('BISABUELA', finalPmM)}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* DAM BRANCH (MADRE) */}
+                      <div className="p-4 rounded-xl bg-rose-50/50 border border-rose-200 space-y-3">
+                        <div className="flex items-center justify-between border-b border-rose-100 pb-1.5">
+                          <span className="text-xs font-black uppercase tracking-wider text-rose-800 flex items-center gap-1.5">
+                            <Award className="w-4 h-4 text-rose-600" />
+                            Línea Materna (Madre y Antepasados)
+                          </span>
+                          <span className="text-[10px] text-rose-600 font-semibold">Generaciones I, II y III</span>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                          {/* Mother (1st Gen) */}
+                          <div className="flex flex-col justify-center">
+                            {renderAncestorNode('MADRE', currentDog.madreNombre, currentDog.madreId, true)}
+                          </div>
+
+                          {/* Grandparents (2nd Gen) */}
+                          <div className="space-y-2">
+                            {renderAncestorNode('ABUELO MATERNO', finalAbueloMaterno)}
+                            {renderAncestorNode('ABUELA MATERNA', finalAbuelaMaterna)}
+                          </div>
+
+                          {/* Great-Grandparents (3rd Gen) */}
+                          <div className="space-y-1.5 text-[11px]">
+                            {renderAncestorNode('BISABUELO', finalMpP)}
+                            {renderAncestorNode('BISABUELA', finalMpM)}
+                            {renderAncestorNode('BISABUELO', finalMmP)}
+                            {renderAncestorNode('BISABUELA', finalMmM)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -809,16 +787,35 @@ export const DogDetailModal: React.FC<DogDetailModalProps> = ({ dog, onClose, on
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-sm font-bold text-slate-900">Certificados y Sanidad Oficial</h4>
-                  <p className="text-xs text-slate-500">Evaluaciones oficiales de displasia, brucelosis y ADN</p>
+                  <p className="text-xs text-slate-500">Evaluaciones oficiales de displasia, brucelosis y libreta digital de vacunas</p>
                 </div>
-                <button
-                  onClick={() => openPrintModal('HEALTH_BOOK', currentDog.id)}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
-                >
-                  <FileText className="w-3.5 h-3.5" />
-                  <span>Imprimir Libreta Sanitaria</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  {canEditDog && (
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingSanitaryRecord(true)}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ Nueva Vacuna / Control</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => openPrintModal('HEALTH_BOOK', currentDog.id)}
+                    className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold flex items-center gap-1.5 transition-colors border border-slate-200 shadow-xs cursor-pointer"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Imprimir Libreta</span>
+                  </button>
+                </div>
               </div>
+
+              {sanitaryFeedback && (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{sanitaryFeedback}</span>
+                </div>
+              )}
 
               {/* Health Cards Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
@@ -840,7 +837,7 @@ export const DogDetailModal: React.FC<DogDetailModalProps> = ({ dog, onClose, on
                     {currentDog.brucelosis?.resultado || 'NEGATIVO'}
                   </div>
                   <span className="text-[10px] text-slate-500 mt-1 block">
-                    Vigencia: {currentDog.brucelosis?.vigenciaHasta || 'Al día'}
+                    Vigencia: {currentDog.brucelosis?.vigenciaHasta ? formatDateDMY(currentDog.brucelosis.vigenciaHasta) : 'Al día'}
                   </span>
                 </div>
 
@@ -861,6 +858,269 @@ export const DogDetailModal: React.FC<DogDetailModalProps> = ({ dog, onClose, on
                   <div className="text-xs text-slate-700 mt-1">{currentDog.medicacionActual || 'Ninguna'}</div>
                 </div>
               </div>
+
+              {/* Libreta Digital: Listado de Vacunas, Desparasitaciones y Controles */}
+              {(() => {
+                const dogRecords = registrosSanitarios
+                  .filter((r) => r.ejemplarId === currentDog.id)
+                  .sort((a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime());
+
+                return (
+                  <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                      <div className="flex items-center gap-2">
+                        <Stethoscope className="w-4 h-4 text-emerald-600" />
+                        <h5 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                          Historial de Inmunizaciones y Controles Veterinarios
+                        </h5>
+                      </div>
+                      <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
+                        {dogRecords.length} {dogRecords.length === 1 ? 'registro' : 'registros'}
+                      </span>
+                    </div>
+
+                    {dogRecords.length === 0 ? (
+                      <div className="p-6 text-center rounded-xl bg-slate-50 border border-dashed border-slate-200">
+                        <Stethoscope className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                        <p className="text-xs text-slate-500 font-medium">
+                          No hay vacunas ni desparasitaciones registradas aún para {currentDog.nombreCompleto}.
+                        </p>
+                        {canEditDog && (
+                          <button
+                            type="button"
+                            onClick={() => setIsAddingSanitaryRecord(true)}
+                            className="mt-3 px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Registrar Primera Dosis</span>
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200">
+                        {dogRecords.map((reg) => (
+                          <div
+                            key={reg.id}
+                            className="p-3 bg-white hover:bg-slate-50/70 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs"
+                          >
+                            <div className="flex items-start sm:items-center gap-3 min-w-0">
+                              <span
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase shrink-0 ${
+                                  reg.tipo === 'VACUNA'
+                                    ? 'bg-blue-100 text-blue-800'
+                                    : reg.tipo === 'DESPARASITACION'
+                                    ? 'bg-purple-100 text-purple-800'
+                                    : reg.tipo === 'ESTUDIO'
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-amber-100 text-amber-800'
+                                }`}
+                              >
+                                {reg.tipo}
+                              </span>
+
+                              <div className="min-w-0">
+                                <strong className="text-slate-900 font-bold block truncate">
+                                  {reg.nombre}
+                                </strong>
+                                <div className="text-[11px] text-slate-500 flex flex-wrap items-center gap-2 mt-0.5">
+                                  <span>Fecha: <strong className="text-slate-700 font-semibold">{formatDateDMY(reg.fecha)}</strong></span>
+                                  {reg.proximaFecha && (
+                                    <>
+                                      <span>•</span>
+                                      <span className="text-amber-700 font-medium">
+                                        Próximo: {formatDateDMY(reg.proximaFecha)}
+                                      </span>
+                                    </>
+                                  )}
+                                  {reg.dosisOLote && (
+                                    <>
+                                      <span>•</span>
+                                      <span className="font-mono text-slate-500">Lote: {reg.dosisOLote}</span>
+                                    </>
+                                  )}
+                                  {reg.veterinario && (
+                                    <>
+                                      <span>•</span>
+                                      <span className="text-slate-600">{reg.veterinario}</span>
+                                    </>
+                                  )}
+                                </div>
+                                {reg.observaciones && (
+                                  <p className="text-[10px] text-slate-500 mt-1 italic">
+                                    {reg.observaciones}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+
+                            {canEditDog && (
+                              <button
+                                type="button"
+                                onClick={() => deleteRegistroSanitario(reg.id)}
+                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer self-end sm:self-center shrink-0"
+                                title="Eliminar registro"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Inline modal to add sanitary record */}
+              {isAddingSanitaryRecord && (
+                <div className="fixed inset-0 z-60 flex items-center justify-center p-3 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
+                  <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md shadow-2xl p-4 space-y-3 text-xs text-slate-800">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                      <h4 className="font-bold text-sm text-slate-900 flex items-center gap-1.5">
+                        <Stethoscope className="w-4 h-4 text-emerald-600" />
+                        <span>Nueva Inmunización / Control Sanitario</span>
+                      </h4>
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingSanitaryRecord(false)}
+                        className="p-1 rounded-lg text-slate-400 hover:text-slate-700 cursor-pointer"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <form
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        if (!newSanNombre.trim()) return;
+                        try {
+                          await addRegistroSanitario({
+                            criaderoId: currentDog.criaderoId || currentCriaderoId,
+                            ejemplarId: currentDog.id,
+                            tipo: newSanTipo,
+                            nombre: newSanNombre.trim(),
+                            fecha: newSanFecha,
+                            proximaFecha: newSanProxFecha || undefined,
+                            dosisOLote: newSanDosis || undefined,
+                            veterinario: newSanVet,
+                            observaciones: newSanObs || undefined,
+                          });
+                          setIsAddingSanitaryRecord(false);
+                          setNewSanNombre('');
+                          setNewSanDosis('');
+                          setNewSanProxFecha('');
+                          setNewSanObs('');
+                          setSanitaryFeedback('¡Vacuna / control registrado con éxito!');
+                          setTimeout(() => setSanitaryFeedback(null), 3500);
+                        } catch (err: any) {
+                          console.error('Error registrando sanidad:', err);
+                        }
+                      }}
+                      className="space-y-3"
+                    >
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">Tipo de Evento</label>
+                        <select
+                          value={newSanTipo}
+                          onChange={(e) => setNewSanTipo(e.target.value as any)}
+                          className="w-full px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 font-bold text-slate-800 focus:outline-none focus:border-emerald-500"
+                        >
+                          <option value="VACUNA">VACUNA</option>
+                          <option value="DESPARASITACION">DESPARASITACIÓN</option>
+                          <option value="ESTUDIO">ESTUDIO / ANÁLISIS</option>
+                          <option value="CONTROL">CONTROL DE RUTINA</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">
+                          Nombre de Vacuna / Tratamiento *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={newSanNombre}
+                          onChange={(e) => setNewSanNombre(e.target.value)}
+                          placeholder="ej: Séxtuple + Coronavirus (Vanguard Plus 5/CV-L)"
+                          className="w-full px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-900 focus:outline-none focus:border-emerald-500 font-medium"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block font-semibold text-slate-700 mb-1">Fecha de Aplicación</label>
+                          <input
+                            type="date"
+                            required
+                            value={newSanFecha}
+                            onChange={(e) => setNewSanFecha(e.target.value)}
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-900 font-mono text-xs focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-slate-700 mb-1">Próximo Vencimiento</label>
+                          <input
+                            type="date"
+                            value={newSanProxFecha}
+                            onChange={(e) => setNewSanProxFecha(e.target.value)}
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-900 font-mono text-xs focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block font-semibold text-slate-700 mb-1">Lote / Dosis</label>
+                          <input
+                            type="text"
+                            value={newSanDosis}
+                            onChange={(e) => setNewSanDosis(e.target.value)}
+                            placeholder="ej: Lote #4921-A"
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-900 text-xs focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block font-semibold text-slate-700 mb-1">Veterinario</label>
+                          <input
+                            type="text"
+                            value={newSanVet}
+                            onChange={(e) => setNewSanVet(e.target.value)}
+                            placeholder="Dr. Veterinario"
+                            className="w-full px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-900 text-xs focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">Observaciones</label>
+                        <input
+                          type="text"
+                          value={newSanObs}
+                          onChange={(e) => setNewSanObs(e.target.value)}
+                          placeholder="Sin reacciones adversas, peso 32kg"
+                          className="w-full px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-900 text-xs focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                        <button
+                          type="button"
+                          onClick={() => setIsAddingSanitaryRecord(false)}
+                          className="px-3 py-1.5 rounded-lg text-slate-600 hover:bg-slate-100 font-semibold cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition-colors cursor-pointer shadow-xs"
+                        >
+                          Guardar Registro
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -887,7 +1147,7 @@ export const DogDetailModal: React.FC<DogDetailModalProps> = ({ dog, onClose, on
                       <div>
                         <strong className="text-slate-900 font-bold">{camada.identificador}</strong>
                         <div className="text-[11px] text-slate-500 mt-0.5">
-                          Nacimiento: {camada.fechaNacimiento} • Total: {camada.totalCachorros} cachorros ({camada.nacidosVivos} vivos)
+                          Nacimiento: {formatDateDMY(camada.fechaNacimiento)} • Total: {camada.totalCachorros} cachorros ({camada.nacidosVivos} vivos)
                         </div>
                       </div>
                       <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
@@ -920,7 +1180,7 @@ export const DogDetailModal: React.FC<DogDetailModalProps> = ({ dog, onClose, on
                           {monta.hembraNombre} x {monta.machoNombre}
                         </strong>
                         <div className="text-[11px] text-slate-500 mt-0.5">
-                          Fecha: {monta.fechaMonta} • Servicio: {monta.tipoServicio}
+                          Fecha: {formatDateDMY(monta.fechaMonta)} • Servicio: {monta.tipoServicio}
                         </div>
                       </div>
                       <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
@@ -950,7 +1210,7 @@ export const DogDetailModal: React.FC<DogDetailModalProps> = ({ dog, onClose, on
                       </span>
                     </div>
                     <div className="text-[11px] text-slate-500 flex flex-wrap gap-2">
-                      <span>Fecha: {expo.fecha}</span>
+                      <span>Fecha: {formatDateDMY(expo.fecha)}</span>
                       <span>•</span>
                       <span>Lugar: {expo.lugar}</span>
                       <span>•</span>
@@ -979,22 +1239,57 @@ export const DogDetailModal: React.FC<DogDetailModalProps> = ({ dog, onClose, on
           <div>
             {canEditDog && (
               <>
-                {!confirmDelete ? (
+                {currentDog.estado === 'RETIRADO' || currentDog.activoEnPlantel === false ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200">
+                      Ejemplar Retirado / Histórico
+                    </span>
+                    <button
+                      type="button"
+                      disabled={isReactivating}
+                      onClick={async () => {
+                        try {
+                          setIsReactivating(true);
+                          await reactivarEjemplar(currentDog.id);
+                          setCurrentDog((prev) => ({
+                            ...prev,
+                            estado: 'ACTIVO',
+                            activoEnPlantel: true,
+                            estadoReproductivo: 'ACTIVO',
+                          }));
+                        } catch (err) {
+                          console.error('Error reactivando ejemplar:', err);
+                        } finally {
+                          setIsReactivating(false);
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    >
+                      {isReactivating ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <RotateCcw className="w-3.5 h-3.5" />
+                      )}
+                      <span>Reactivar en Plantel</span>
+                    </button>
+                  </div>
+                ) : !confirmDelete ? (
                   <button
                     onClick={() => setConfirmDelete(true)}
-                    className="text-rose-600 hover:text-rose-700 flex items-center gap-1 font-semibold transition-colors cursor-pointer"
+                    className="text-purple-600 hover:text-purple-700 flex items-center gap-1 font-semibold transition-colors cursor-pointer"
+                    title="Retirar del plantel (Soft Delete - Conserva todo el historial)"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Eliminar Ejemplar</span>
+                    <Archive className="w-3.5 h-3.5" />
+                    <span>Retirar del Plantel (Soft Delete)</span>
                   </button>
                 ) : (
                   <div className="flex items-center gap-2">
-                    <span className="text-amber-800 font-bold">¿Confirmar eliminación?</span>
+                    <span className="text-purple-800 font-bold">¿Retirar ejemplar (conservar historial)?</span>
                     <button
                       onClick={handleDelete}
-                      className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold transition-colors cursor-pointer"
+                      className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-bold transition-colors cursor-pointer"
                     >
-                      Sí, eliminar
+                      Sí, retirar
                     </button>
                     <button
                       onClick={() => setConfirmDelete(false)}
@@ -1026,6 +1321,18 @@ export const DogDetailModal: React.FC<DogDetailModalProps> = ({ dog, onClose, on
           docUrl={currentDog.pedigreeDocUrl}
           docNombre={currentDog.pedigreeDocNombre || `pedigree_${currentDog.nombreCompleto.replace(/\s+/g, '_')}.pdf`}
           docTipo={currentDog.pedigreeDocTipo || 'PDF'}
+        />
+      )}
+
+      {/* Modal for cloning external dog into current kennel */}
+      {isCloningModalOpen && (
+        <DogFormModal
+          dog={currentDog}
+          isCloning={true}
+          onClose={() => {
+            setIsCloningModalOpen(false);
+            onClose();
+          }}
         />
       )}
     </div>

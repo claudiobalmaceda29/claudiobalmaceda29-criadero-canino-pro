@@ -13,7 +13,15 @@ import {
   Search,
   X,
   FileSpreadsheet,
+  Upload,
+  Eye,
+  Download,
+  CheckCircle2,
+  Loader2,
+  FileText,
 } from 'lucide-react';
+import { formatDateDMY } from '../../lib/dogUtils';
+import { uploadPdfOrDocument } from '../../lib/documentStorage';
 
 export const HealthView: React.FC = () => {
   const { registrosSanitarios, ejemplares, addRegistroSanitario, deleteRegistroSanitario, currentCriaderoId, openPrintModal, exportToCSV } = useApp();
@@ -32,6 +40,9 @@ export const HealthView: React.FC = () => {
   const [veterinario, setVeterinario] = useState('Dr. Fernando Soria (MP 4921)');
   const [resultado, setResultado] = useState('');
   const [observaciones, setObservaciones] = useState('');
+  const [adjuntoFile, setAdjuntoFile] = useState<File | null>(null);
+  const [isUploadingAdjunto, setIsUploadingAdjunto] = useState(false);
+  const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
 
   const selectedDog = ejemplares.find((e) => e.id === ejemplarId);
 
@@ -47,21 +58,49 @@ export const HealthView: React.FC = () => {
     return matchesSearch && matchesTipo;
   });
 
-  const handleSaveSanidad = (e: React.FormEvent) => {
+  const handleSaveSanidad = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!nombre.trim() || !selectedDog) return;
 
-    addRegistroSanitario({
+    let adjuntoUrl: string | undefined = undefined;
+    let adjuntoNombre: string | undefined = undefined;
+    let adjuntoTipo: 'PDF' | 'IMAGEN' | undefined = undefined;
+    let adjuntoSize: string | undefined = undefined;
+
+    if (adjuntoFile) {
+      setIsUploadingAdjunto(true);
+      try {
+        const uploadRes = await uploadPdfOrDocument(
+          adjuntoFile,
+          'documentos',
+          `sanidad_${selectedDog.nombreCompleto || selectedDog.id}`
+        );
+        adjuntoUrl = uploadRes.url;
+        adjuntoNombre = uploadRes.docNombre;
+        adjuntoTipo = uploadRes.docTipo;
+        adjuntoSize = uploadRes.sizeStr;
+      } catch (uploadErr) {
+        console.warn('Error subiendo adjunto sanitario:', uploadErr);
+      } finally {
+        setIsUploadingAdjunto(false);
+      }
+    }
+
+    await addRegistroSanitario({
       criaderoId: currentCriaderoId,
       ejemplarId: selectedDog.id,
       tipo,
-      nombre,
+      nombre: nombre.trim(),
       fecha,
       proximaFecha: proximaFecha || undefined,
       dosisOLote: dosisOLote || undefined,
       veterinario,
       resultado: resultado || undefined,
       observaciones: observaciones || undefined,
+      adjuntoUrl,
+      adjuntoNombre,
+      adjuntoTipo,
+      adjuntoSize,
     });
 
     setIsFormOpen(false);
@@ -69,6 +108,9 @@ export const HealthView: React.FC = () => {
     setDosisOLote('');
     setResultado('');
     setObservaciones('');
+    setAdjuntoFile(null);
+    setSaveSuccessMsg('¡Registro sanitario guardado correctamente!');
+    setTimeout(() => setSaveSuccessMsg(null), 3500);
   };
 
   const handleExportCSV = () => {
@@ -119,6 +161,13 @@ export const HealthView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {saveSuccessMsg && (
+        <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>{saveSuccessMsg}</span>
+        </div>
+      )}
 
       {/* Official Health Highlights Panel */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -201,6 +250,7 @@ export const HealthView: React.FC = () => {
                 <th className="p-3">Detalle / Procedimiento</th>
                 <th className="p-3">Próximo Refuerzo</th>
                 <th className="p-3">Veterinario Actuante</th>
+                <th className="p-3 text-center">Doc/Estudio</th>
                 <th className="p-3 text-center">Libreta</th>
                 <th className="p-3 text-center">Acciones</th>
               </tr>
@@ -210,7 +260,7 @@ export const HealthView: React.FC = () => {
                 const dog = ejemplares.find((e) => e.id === reg.ejemplarId);
                 return (
                   <tr key={reg.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="p-3 font-mono text-slate-500">{reg.fecha}</td>
+                    <td className="p-3 font-mono text-slate-500">{formatDateDMY(reg.fecha)}</td>
                     <td className="p-3 font-bold text-slate-900">
                       {dog?.nombreCompleto || 'Ejemplar Registrado'}
                     </td>
@@ -233,9 +283,26 @@ export const HealthView: React.FC = () => {
                       )}
                     </td>
                     <td className="p-3 font-mono font-medium text-amber-700">
-                      {reg.proximaFecha || 'N/A'}
+                      {reg.proximaFecha ? formatDateDMY(reg.proximaFecha) : 'N/A'}
                     </td>
                     <td className="p-3 text-slate-600">{reg.veterinario}</td>
+                    <td className="p-3 text-center">
+                      {reg.adjuntoUrl ? (
+                        <a
+                          href={reg.adjuntoUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          download={reg.adjuntoNombre || `documento-sanitario-${reg.id}.pdf`}
+                          className="px-2 py-1 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 text-[10px] font-bold border border-blue-200 inline-flex items-center gap-1 transition-colors cursor-pointer"
+                          title="Descargar / Ver documento adjunto"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>{reg.adjuntoTipo || 'Doc'}</span>
+                        </a>
+                      ) : (
+                        <span className="text-[10px] text-slate-400 font-mono">-</span>
+                      )}
+                    </td>
                     <td className="p-3 text-center">
                       {dog && (
                         <button
@@ -263,7 +330,7 @@ export const HealthView: React.FC = () => {
 
               {filteredSanidad.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="p-8 text-center text-slate-500 text-xs">
+                  <td colSpan={9} className="p-8 text-center text-slate-500 text-xs">
                     Sin registros sanitarios con los criterios seleccionados.
                   </td>
                 </tr>
@@ -376,6 +443,40 @@ export const HealthView: React.FC = () => {
                 />
               </div>
 
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Adjuntar Comprobante / Estudio Oficial (PDF o Imagen)
+                </label>
+                <div className="flex items-center gap-2">
+                  <label className="px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs">
+                    <Upload className="w-3.5 h-3.5 text-blue-600" />
+                    <span>{adjuntoFile ? 'Cambiar archivo' : 'Seleccionar PDF o Imagen'}</span>
+                    <input
+                      type="file"
+                      accept="application/pdf,image/*"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) setAdjuntoFile(f);
+                      }}
+                      className="hidden"
+                    />
+                  </label>
+                  {adjuntoFile && (
+                    <div className="flex items-center gap-1.5 text-xs text-slate-700 font-medium">
+                      <FileText className="w-4 h-4 text-emerald-600" />
+                      <span className="truncate max-w-[200px]">{adjuntoFile.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => setAdjuntoFile(null)}
+                        className="text-rose-500 hover:text-rose-700 px-1 font-bold cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
                 <button
                   type="button"
@@ -386,9 +487,17 @@ export const HealthView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer transition-colors shadow-xs"
+                  disabled={isUploadingAdjunto}
+                  className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold cursor-pointer transition-colors shadow-xs flex items-center gap-1.5"
                 >
-                  Guardar Registro
+                  {isUploadingAdjunto ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>Subiendo archivo...</span>
+                    </>
+                  ) : (
+                    <span>Guardar Registro</span>
+                  )}
                 </button>
               </div>
             </form>

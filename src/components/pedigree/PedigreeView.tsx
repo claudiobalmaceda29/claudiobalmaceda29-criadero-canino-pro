@@ -25,6 +25,7 @@ import {
 import { DocumentPreviewModal } from '../common/DocumentPreviewModal';
 import { DogDetailModal } from '../dogs/DogDetailModal';
 import { parsePedigreeFile } from '../../lib/pdfPedigreeParser';
+import { persistPedigreeDocument, resolveDocumentUrl } from '../../lib/documentStorage';
 
 export const PedigreeView: React.FC = () => {
   const {
@@ -65,30 +66,34 @@ export const PedigreeView: React.FC = () => {
     });
   };
 
+  const [uploadProgressText, setUploadProgressText] = useState<string>('Subiendo documento...');
+
   // Upload pedigree document for selected dog with OCR extraction
   const handleUploadPedigreeDoc = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!selectedDog) return;
-    const file = e.target.files?.[0];
+    const inputEl = e.target;
+    const file = inputEl.files?.[0];
+    inputEl.value = ''; // Reset input to ensure re-selecting same file triggers change
     if (!file) return;
-    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
     setIsExtractingPdf(true);
+    setUploadProgressText('Iniciando subida del documento...');
     setExtractionMessage(null);
     setExtractionError(null);
 
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      if (!ev.target?.result) {
-        setIsExtractingPdf(false);
-        setExtractionError('No se pudo leer el archivo seleccionado.');
-        return;
-      }
-      const base64Data = ev.target.result as string;
+    try {
+      const persisted = await persistPedigreeDocument(
+        file,
+        selectedDog.nombreCompleto || selectedDog.id || 'ejemplar',
+        (pct, text) => setUploadProgressText(text)
+      );
+      setUploadProgressText('Guardando en Firestore y analizando genealogía...');
+
       const baseUpdates: Partial<Ejemplar> = {
-        pedigreeDocUrl: base64Data,
-        pedigreeDocNombre: file.name,
-        pedigreeDocTipo: isPdf ? 'PDF' : 'IMAGEN',
+        pedigreeDocUrl: persisted.url,
+        pedigreeDocNombre: persisted.docNombre,
+        pedigreeDocTipo: persisted.docTipo,
         pedigreeDocFecha: new Date().toISOString().split('T')[0],
-        pedigreeDocSize: `${(file.size / 1024).toFixed(0)} KB`,
+        pedigreeDocSize: persisted.sizeStr,
       };
 
       // Save base attached file
@@ -135,12 +140,33 @@ export const PedigreeView: React.FC = () => {
         }
       } catch (err: any) {
         console.error('Error extracting pedigree in PedigreeView:', err);
-        setExtractionError('Documento guardado, pero ocurrió un problema con la extracción automática OCR.');
-      } finally {
-        setIsExtractingPdf(false);
+        setExtractionMessage('Documento de pedigree adjuntado con éxito.');
       }
-    };
-    reader.readAsDataURL(file);
+    } catch (err: any) {
+      console.error('Error uploading pedigree document:', err);
+      setExtractionError('Ocurrió un error al guardar el documento. Intente nuevamente.');
+    } finally {
+      setIsExtractingPdf(false);
+    }
+  };
+
+  const handleDownloadPedigreeDoc = async () => {
+    if (!selectedDog?.pedigreeDocUrl) return;
+    try {
+      const url = await resolveDocumentUrl(selectedDog.pedigreeDocUrl);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download =
+        selectedDog.pedigreeDocNombre ||
+        `pedigree-${selectedDog.nombreCompleto.replace(/\s+/g, '_')}.${
+          selectedDog.pedigreeDocTipo === 'IMAGEN' ? 'jpg' : 'pdf'
+        }`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (e) {
+      console.warn('Error downloading pedigree doc:', e);
+    }
   };
 
   // Render ancestor card: clickable if in system, plain text without link if not
@@ -189,7 +215,14 @@ export const PedigreeView: React.FC = () => {
                 className="w-6 h-6 rounded-md object-cover border border-slate-200 dark:border-slate-700 shrink-0"
               />
             )}
-            <strong className="text-blue-900 dark:text-blue-100 group-hover:text-blue-950 dark:group-hover:text-white font-black text-xs truncate block">
+            <strong
+              onClick={(e) => {
+                e.stopPropagation();
+                setViewingDetailDog(matched);
+              }}
+              className="text-blue-900 dark:text-blue-100 group-hover:text-blue-600 dark:group-hover:text-blue-300 font-black text-xs truncate block hover:underline cursor-pointer"
+              title={`Hacé click para ver la ficha completa de ${matched.nombreCompleto}`}
+            >
               {matched.nombreCompleto}
             </strong>
           </div>
@@ -201,10 +234,11 @@ export const PedigreeView: React.FC = () => {
                 e.stopPropagation();
                 setViewingDetailDog(matched);
               }}
-              className="text-[10px] text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-bold hover:underline"
-              title="Abrir ficha completa"
+              className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/40 text-[10px] text-blue-700 dark:text-blue-300 hover:bg-blue-600 hover:text-white font-bold transition-colors cursor-pointer flex items-center gap-0.5"
+              title="Abrir ficha completa del ejemplar"
             >
-              Ficha
+              <span>Ver Ficha</span>
+              <span>↗</span>
             </button>
           </div>
         </div>
@@ -261,26 +295,6 @@ export const PedigreeView: React.FC = () => {
             </button>
           </div>
 
-          {/* Pedigree Doc Button (View / Upload) */}
-          {selectedDog?.pedigreeDocUrl ? (
-            <button
-              onClick={() => setIsPreviewOpen(true)}
-              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
-              title="Ver PDF o imagen del pedigree oficial adjunto"
-            >
-              <Eye className="w-4 h-4" />
-              <span>Ver Pedigree Adjunto</span>
-            </button>
-          ) : (
-            canEditSelectedDog && (
-              <label className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs flex items-center gap-1.5 transition-all border border-slate-200 dark:border-slate-700 shadow-2xs cursor-pointer">
-                <Upload className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                <span>Adjuntar Pedigree (PDF/Img)</span>
-                <input type="file" accept=".pdf,image/*" className="hidden" onChange={handleUploadPedigreeDoc} />
-              </label>
-            )
-          )}
-
           {selectedDog && (
             <button
               onClick={() => openPrintModal('PEDIGREE', selectedDog.id)}
@@ -292,42 +306,6 @@ export const PedigreeView: React.FC = () => {
           )}
         </div>
       </div>
-
-      {/* Pedigree OCR Extraction Feedback Banners */}
-      {isExtractingPdf && (
-        <div className="p-3.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 text-blue-900 dark:text-blue-200 flex items-center gap-2.5 text-xs">
-          <Loader2 className="w-4 h-4 text-blue-600 animate-spin shrink-0" />
-          <div>
-            <strong className="block font-bold">Extrayendo genealogía con IA y OCR...</strong>
-            <span className="text-[11px] text-blue-700 dark:text-blue-300">
-              Analizando documento oficial de pedigree y actualizando el árbol de 4 generaciones.
-            </span>
-          </div>
-        </div>
-      )}
-
-      {extractionMessage && (
-        <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200 flex items-center justify-between gap-2 text-xs">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span className="font-bold">{extractionMessage}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setExtractionMessage(null)}
-            className="text-emerald-700 dark:text-emerald-300 hover:text-emerald-900 text-xs font-bold px-1 cursor-pointer"
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
-      {extractionError && (
-        <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 flex items-center gap-2 text-xs font-medium">
-          <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-          <span>{extractionError}</span>
-        </div>
-      )}
 
       {/* Dog Selector Strip */}
       <div className="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
@@ -387,16 +365,6 @@ export const PedigreeView: React.FC = () => {
                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-900/80 text-blue-800 dark:text-blue-200 border border-blue-200 dark:border-blue-800 uppercase">
                     EJEMPLAR SUJETO ({selectedDog.sexo})
                   </span>
-                  {selectedDog.pedigreeDocUrl && (
-                    <button
-                      type="button"
-                      onClick={() => setIsPreviewOpen(true)}
-                      className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-200 dark:hover:bg-emerald-900/50 transition-colors inline-flex items-center gap-1 cursor-pointer"
-                    >
-                      <FileCheck2 className="w-3 h-3 text-emerald-700 dark:text-emerald-400" />
-                      <span>Pedigree {selectedDog.pedigreeDocTipo || 'Doc'}</span>
-                    </button>
-                  )}
                 </div>
 
                 <h3 className="text-lg font-black text-slate-900 dark:text-white mt-1">{selectedDog.nombreCompleto}</h3>
@@ -411,80 +379,195 @@ export const PedigreeView: React.FC = () => {
               </div>
             </div>
 
-            {/* Tree Branching Grid */}
-            <div className="grid grid-cols-1 gap-6">
-              {/* SIRE BRANCH (PADRE) */}
-              <div className="p-4 rounded-2xl bg-blue-50/40 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/50 space-y-4">
-                <div className="flex items-center justify-between border-b border-blue-100 dark:border-blue-900/40 pb-2">
-                  <span className="text-xs font-black uppercase tracking-wider text-blue-800 dark:text-blue-300 flex items-center gap-1.5">
-                    <Award className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                    LÍNEA PATERNA (PADRE Y ANTEPASADOS)
-                  </span>
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {generationsCount === 4 ? '3 Generaciones de Antepasados' : '2 Generaciones de Antepasados'}
-                  </span>
+            {/* Documento de Pedigree Físico Adjunto (PDF o Imagen) */}
+            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 shadow-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 shrink-0">
+                    <FileCheck2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h5 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                      <span>Documento de Pedigree Oficial (PDF / Imagen)</span>
+                      {selectedDog.pedigreeDocUrl && (
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300">
+                          Adjuntado
+                        </span>
+                      )}
+                    </h5>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      {selectedDog.pedigreeDocUrl
+                        ? `${selectedDog.pedigreeDocNombre || 'Documento adjunto'} (${selectedDog.pedigreeDocSize || 'PDF/Img'})`
+                        : 'Subí y respaldá el archivo de pedigree físico oficial en Firebase Storage.'}
+                    </p>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {/* Father (1st Gen) */}
-                  <div className="flex flex-col justify-center">
-                    {renderAncestorNode('PADRE', selectedDog.padreNombre, selectedDog.padreId, true, 'SIRE')}
-                  </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {selectedDog.pedigreeDocUrl && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setIsPreviewOpen(true)}
+                        className="px-3 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 text-blue-700 dark:text-blue-300 text-xs font-bold flex items-center gap-1.5 transition-colors border border-blue-200 dark:border-blue-800 cursor-pointer"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>Ver Documento</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleDownloadPedigreeDoc}
+                        className="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition-colors border border-slate-200 dark:border-slate-600 cursor-pointer"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Descargar</span>
+                      </button>
+                    </>
+                  )}
 
-                  {/* Grandparents (2nd Gen) */}
-                  <div className="space-y-2">
-                    {renderAncestorNode('ABUELO PATERNO', selectedDog.abueloPaterno, undefined, false, 'SIRE')}
-                    {renderAncestorNode('ABUELA PATERNA', selectedDog.abuelaPaterna, undefined, false, 'SIRE')}
-                  </div>
-
-                  {/* Great-Grandparents (3rd / 4th Gen) */}
-                  {generationsCount === 4 && (
-                    <div className="space-y-1.5 text-[11px]">
-                      {renderAncestorNode('BISABUELO', selectedDog.bisabuelos?.pp_p, undefined, false, 'SIRE')}
-                      {renderAncestorNode('BISABUELA', selectedDog.bisabuelos?.pp_m, undefined, false, 'SIRE')}
-                      {renderAncestorNode('BISABUELO', selectedDog.bisabuelos?.pm_p, undefined, false, 'SIRE')}
-                      {renderAncestorNode('BISABUELA', selectedDog.bisabuelos?.pm_m, undefined, false, 'SIRE')}
-                    </div>
+                  {canEditSelectedDog && (
+                    <label className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer">
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>{selectedDog.pedigreeDocUrl ? 'Reemplazar Pedigree' : '+ Cargar Pedigree Físico'}</span>
+                      <input
+                        type="file"
+                        accept=".pdf,image/png,image/jpeg,image/webp"
+                        onChange={handleUploadPedigreeDoc}
+                        className="hidden"
+                        disabled={isExtractingPdf}
+                      />
+                    </label>
                   )}
                 </div>
               </div>
 
-              {/* DAM BRANCH (MADRE) */}
-              <div className="p-4 rounded-2xl bg-rose-50/40 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50 space-y-4">
-                <div className="flex items-center justify-between border-b border-rose-100 dark:border-rose-900/40 pb-2">
-                  <span className="text-xs font-black uppercase tracking-wider text-rose-800 dark:text-rose-300 flex items-center gap-1.5">
-                    <Award className="w-4 h-4 text-rose-600 dark:text-rose-400" />
-                    LÍNEA MATERNA (MADRE Y ANTEPASADOS)
-                  </span>
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {generationsCount === 4 ? '3 Generaciones de Antepasados' : '2 Generaciones de Antepasados'}
-                  </span>
+              {isExtractingPdf && (
+                <div className="mt-3 p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 text-blue-900 dark:text-blue-200 text-xs flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 text-blue-600 animate-spin shrink-0" />
+                  <span>{uploadProgressText}</span>
                 </div>
+              )}
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {/* Mother (1st Gen) */}
-                  <div className="flex flex-col justify-center">
-                    {renderAncestorNode('MADRE', selectedDog.madreNombre, selectedDog.madreId, true, 'DAM')}
-                  </div>
-
-                  {/* Grandparents (2nd Gen) */}
-                  <div className="space-y-2">
-                    {renderAncestorNode('ABUELO MATERNO', selectedDog.abueloMaterno, undefined, false, 'DAM')}
-                    {renderAncestorNode('ABUELA MATERNA', selectedDog.abuelaMaterna, undefined, false, 'DAM')}
-                  </div>
-
-                  {/* Great-Grandparents (3rd / 4th Gen) */}
-                  {generationsCount === 4 && (
-                    <div className="space-y-1.5 text-[11px]">
-                      {renderAncestorNode('BISABUELO', selectedDog.bisabuelos?.mp_p, undefined, false, 'DAM')}
-                      {renderAncestorNode('BISABUELA', selectedDog.bisabuelos?.mp_m, undefined, false, 'DAM')}
-                      {renderAncestorNode('BISABUELO', selectedDog.bisabuelos?.mm_p, undefined, false, 'DAM')}
-                      {renderAncestorNode('BISABUELA', selectedDog.bisabuelos?.mm_m, undefined, false, 'DAM')}
-                    </div>
-                  )}
+              {extractionMessage && (
+                <div className="mt-3 p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 text-emerald-800 dark:text-emerald-200 text-xs flex items-center justify-between">
+                  <span className="font-bold">{extractionMessage}</span>
+                  <button type="button" onClick={() => setExtractionMessage(null)} className="text-xs font-bold text-emerald-700">✕</button>
                 </div>
-              </div>
+              )}
+
+              {extractionError && (
+                <div className="mt-3 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 text-rose-800 dark:text-rose-200 text-xs flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{extractionError}</span>
+                </div>
+              )}
             </div>
+
+            {/* Tree Branching Grid */}
+            {(() => {
+              const fatherDog =
+                (selectedDog.padreId && findDogInSystem(selectedDog.padreId)) ||
+                findDogInSystem(selectedDog.padreNombre);
+              const motherDog =
+                (selectedDog.madreId && findDogInSystem(selectedDog.madreId)) ||
+                findDogInSystem(selectedDog.madreNombre);
+
+              const finalAbueloPaterno = selectedDog.abueloPaterno || fatherDog?.padreNombre;
+              const finalAbuelaPaterna = selectedDog.abuelaPaterna || fatherDog?.madreNombre;
+              const finalAbueloMaterno = selectedDog.abueloMaterno || motherDog?.padreNombre;
+              const finalAbuelaMaterna = selectedDog.abuelaMaterna || motherDog?.madreNombre;
+
+              const abueloPaternoDog = findDogInSystem(fatherDog?.padreId) || findDogInSystem(finalAbueloPaterno);
+              const abuelaPaternaDog = findDogInSystem(fatherDog?.madreId) || findDogInSystem(finalAbuelaPaterna);
+              const abueloMaternoDog = findDogInSystem(motherDog?.padreId) || findDogInSystem(finalAbueloMaterno);
+              const abuelaMaternaDog = findDogInSystem(motherDog?.madreId) || findDogInSystem(finalAbuelaMaterna);
+
+              const finalPpP = selectedDog.bisabuelos?.pp_p || fatherDog?.bisabuelos?.pp_p || fatherDog?.abueloPaterno || abueloPaternoDog?.padreNombre;
+              const finalPpM = selectedDog.bisabuelos?.pp_m || fatherDog?.bisabuelos?.pp_m || fatherDog?.abuelaPaterna || abueloPaternoDog?.madreNombre;
+              const finalPmP = selectedDog.bisabuelos?.pm_p || fatherDog?.bisabuelos?.pm_p || fatherDog?.abueloMaterno || abuelaPaternaDog?.padreNombre;
+              const finalPmM = selectedDog.bisabuelos?.pm_m || fatherDog?.bisabuelos?.pm_m || fatherDog?.abuelaMaterna || abuelaPaternaDog?.madreNombre;
+
+              const finalMpP = selectedDog.bisabuelos?.mp_p || motherDog?.bisabuelos?.mp_p || motherDog?.abueloPaterno || abueloMaternoDog?.padreNombre;
+              const finalMpM = selectedDog.bisabuelos?.mp_m || motherDog?.bisabuelos?.mp_m || motherDog?.abuelaPaterna || abueloMaternoDog?.madreNombre;
+              const finalMmP = selectedDog.bisabuelos?.mm_p || motherDog?.bisabuelos?.mm_p || motherDog?.abueloMaterno || abuelaMaternaDog?.padreNombre;
+              const finalMmM = selectedDog.bisabuelos?.mm_m || motherDog?.bisabuelos?.mm_m || motherDog?.abuelaMaterna || abuelaMaternaDog?.madreNombre;
+
+              return (
+                <div className="grid grid-cols-1 gap-6">
+                  {/* SIRE BRANCH (PADRE) */}
+                  <div className="p-4 rounded-2xl bg-blue-50/40 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/50 space-y-4">
+                    <div className="flex items-center justify-between border-b border-blue-100 dark:border-blue-900/40 pb-2">
+                      <span className="text-xs font-black uppercase tracking-wider text-blue-800 dark:text-blue-300 flex items-center gap-1.5">
+                        <Award className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                        LÍNEA PATERNA (PADRE Y ANTEPASADOS)
+                      </span>
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {generationsCount === 4 ? '3 Generaciones de Antepasados' : '2 Generaciones de Antepasados'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {/* Father (1st Gen) */}
+                      <div className="flex flex-col justify-center">
+                        {renderAncestorNode('PADRE', selectedDog.padreNombre, selectedDog.padreId, true, 'SIRE')}
+                      </div>
+
+                      {/* Grandparents (2nd Gen) */}
+                      <div className="space-y-2">
+                        {renderAncestorNode('ABUELO PATERNO', finalAbueloPaterno, undefined, false, 'SIRE')}
+                        {renderAncestorNode('ABUELA PATERNA', finalAbuelaPaterna, undefined, false, 'SIRE')}
+                      </div>
+
+                      {/* Great-Grandparents (3rd / 4th Gen) */}
+                      {generationsCount === 4 && (
+                        <div className="space-y-1.5 text-[11px]">
+                          {renderAncestorNode('BISABUELO', finalPpP, undefined, false, 'SIRE')}
+                          {renderAncestorNode('BISABUELA', finalPpM, undefined, false, 'SIRE')}
+                          {renderAncestorNode('BISABUELO', finalPmP, undefined, false, 'SIRE')}
+                          {renderAncestorNode('BISABUELA', finalPmM, undefined, false, 'SIRE')}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* DAM BRANCH (MADRE) */}
+                  <div className="p-4 rounded-xl bg-rose-50/40 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50 space-y-4">
+                    <div className="flex items-center justify-between border-b border-rose-100 dark:border-rose-900/40 pb-2">
+                      <span className="text-xs font-black uppercase tracking-wider text-rose-800 dark:text-rose-300 flex items-center gap-1.5">
+                        <Award className="w-4 h-4 text-rose-600 dark:text-rose-400" />
+                        LÍNEA MATERNA (MADRE Y ANTEPASADOS)
+                      </span>
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {generationsCount === 4 ? '3 Generaciones de Antepasados' : '2 Generaciones de Antepasados'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {/* Mother (1st Gen) */}
+                      <div className="flex flex-col justify-center">
+                        {renderAncestorNode('MADRE', selectedDog.madreNombre, selectedDog.madreId, true, 'DAM')}
+                      </div>
+
+                      {/* Grandparents (2nd Gen) */}
+                      <div className="space-y-2">
+                        {renderAncestorNode('ABUELO MATERNO', finalAbueloMaterno, undefined, false, 'DAM')}
+                        {renderAncestorNode('ABUELA MATERNA', finalAbuelaMaterna, undefined, false, 'DAM')}
+                      </div>
+
+                      {/* Great-Grandparents (3rd / 4th Gen) */}
+                      {generationsCount === 4 && (
+                        <div className="space-y-1.5 text-[11px]">
+                          {renderAncestorNode('BISABUELO', finalMpP, undefined, false, 'DAM')}
+                          {renderAncestorNode('BISABUELA', finalMpM, undefined, false, 'DAM')}
+                          {renderAncestorNode('BISABUELO', finalMmP, undefined, false, 'DAM')}
+                          {renderAncestorNode('BISABUELA', finalMmM, undefined, false, 'DAM')}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       ) : (
