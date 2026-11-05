@@ -25,6 +25,7 @@ import {
   CheckCircle,
   LucideIcon,
   MessageSquare,
+  Boxes,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -54,6 +55,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, onCloseMobile }) =
     criaderos,
     setCurrentCriaderoId,
     notificaciones,
+    insumos,
     unreadChatMessagesCount,
     isDemoMode,
     setIsRegisterModalOpen,
@@ -62,6 +64,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, onCloseMobile }) =
 
   const [showCriaderoMenu, setShowCriaderoMenu] = useState(false);
   const unreadCount = notificaciones.filter((n) => !n.leida).length;
+  const lowStockCount = insumos.filter((i) => i.cantidadActual <= i.stockMinimo).length;
 
   const navGroups: NavGroup[] = [
     {
@@ -143,6 +146,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, onCloseMobile }) =
     {
       title: 'GESTIÓN',
       items: [
+        {
+          id: 'insumos',
+          label: 'Alimentación y Stock',
+          icon: Boxes,
+          badge: lowStockCount > 0 ? `${lowStockCount}` : undefined,
+        },
         {
           id: 'sanidad',
           label: 'Sanidad',

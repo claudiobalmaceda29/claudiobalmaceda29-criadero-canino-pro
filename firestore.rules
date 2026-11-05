@@ -159,6 +159,15 @@ service cloud.firestore {
       allow delete: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
     }
 
+    // Insumos y Control de Stock
+    match /insumos/{insumoId} {
+      allow get: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(request.resource.data.criaderoId));
+      allow update: if isSignedIn() && (isSuperAdmin() || (canAccessCriadero(resource.data.criaderoId) && canAccessCriadero(request.resource.data.criaderoId)));
+      allow delete: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+    }
+
     // Auditoría
     match /auditoria/{logId} {
       allow get: if isSignedIn() && isSuperAdmin();

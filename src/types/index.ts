@@ -467,3 +467,66 @@ export interface ChatConversation {
   updatedAt: string;
 }
 
+// ==========================================
+// CONTROL DE ALIMENTACIÓN Y STOCK DE INSUMOS
+// ==========================================
+
+export type CategoriaInsumo =
+  | 'ALIMENTO'
+  | 'PIPETAS'
+  | 'VACUNAS'
+  | 'SUPLEMENTOS'
+  | 'MEDICAMENTOS'
+  | 'HIGIENE_Y_LIMPIEZA'
+  | 'ACCESORIOS';
+
+export type UnidadMedidaInsumo =
+  | 'BOLSAS'
+  | 'KILOS'
+  | 'DOSIS'
+  | 'PIPETAS'
+  | 'UNIDADES'
+  | 'COMPRIMIDOS'
+  | 'FRASCOS'
+  | 'LITROS';
+
+export type UbicacionInsumo =
+  | 'HELADERA'
+  | 'DEPOSITO'
+  | 'FARMACIA'
+  | 'CANIL'
+  | 'PARIDERA'
+  | 'OTRO';
+
+export interface MovimientoInsumo {
+  id: string;
+  fecha: string; // YYYY-MM-DD o ISO
+  tipo: 'CONSUMO' | 'INGRESO' | 'AJUSTE';
+  cantidad: number;
+  motivo?: string;
+  usuarioNombre?: string;
+}
+
+export interface Insumo {
+  id: string;
+  criaderoId: string;
+  nombre: string;
+  categoria: CategoriaInsumo;
+  marca?: string;
+  cantidadActual: number;
+  unidadMedida: UnidadMedidaInsumo;
+  stockMinimo: number; // Umbral de alerta por debajo del cual se avisa al criador
+  ubicacion: UbicacionInsumo;
+  temperaturaHeladera?: string; // ej. "2°C a 8°C" para vacunas y probióticos
+  lote?: string;
+  fechaVencimiento?: string; // YYYY-MM-DD
+  pesoPorUnidadKg?: number; // ej. 15 kg por bolsa de alimento
+  consumoDiarioEstimado?: number; // ej. 2.5 kg diarios para estimar duración
+  costoUnitario?: number;
+  moneda?: 'ARS' | 'USD';
+  proveedor?: string;
+  observaciones?: string;
+  ultimaActualizacion: string;
+  historialMovimientos?: MovimientoInsumo[];
+}
+

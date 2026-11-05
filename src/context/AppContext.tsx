@@ -19,6 +19,8 @@ import {
   UserRole,
   ChatConversation,
   ChatMessage,
+  Insumo,
+  MovimientoInsumo,
 } from '../types';
 import { cleanForFirestore } from '../lib/dogUtils';
 import {
@@ -37,6 +39,7 @@ import {
   INITIAL_AUDITORIA,
   INITIAL_CHATS,
   INITIAL_MESSAGES,
+  INITIAL_INSUMOS,
 } from '../data/initialData';
 import {
   auth,
@@ -129,6 +132,7 @@ interface AppContextType {
   simulaciones: SimulacionCruza[];
   exposiciones: ExposicionPOA[];
   transacciones: TransaccionEconomica[];
+  insumos: Insumo[];
   auditoria: AuditoriaLog[];
   notificaciones: Notificacion[];
 
@@ -189,6 +193,12 @@ interface AppContextType {
 
   addTransaccion: (t: Omit<TransaccionEconomica, 'id'>) => void;
   deleteTransaccion: (id: string) => void;
+
+  addInsumo: (item: Omit<Insumo, 'id' | 'ultimaActualizacion'>) => Promise<Insumo>;
+  updateInsumo: (id: string, updates: Partial<Insumo>) => Promise<void>;
+  deleteInsumo: (id: string) => Promise<boolean>;
+  registrarConsumoInsumo: (id: string, cantidad: number, motivo?: string) => Promise<void>;
+  ajustarStockInsumo: (id: string, nuevaCantidad: number, motivo?: string) => Promise<void>;
 
   addCriadero: (c: Omit<Criadero, 'id' | 'createdAt'>) => void;
   updateCriadero: (id: string, c: Partial<Criadero>) => void;
@@ -365,6 +375,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       simulaciones: INITIAL_SIMULACIONES,
       exposiciones: INITIAL_EXPOSICIONES,
       transacciones: INITIAL_TRANSACCIONES,
+      insumos: INITIAL_INSUMOS,
       auditoria: INITIAL_AUDITORIA,
     };
   });
@@ -440,6 +451,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [transacciones, setTransacciones] = useState<TransaccionEconomica[]>(
     Array.isArray(localData.transacciones) ? localData.transacciones : INITIAL_TRANSACCIONES
   );
+  const [insumos, setInsumos] = useState<Insumo[]>(
+    Array.isArray(localData.insumos) ? localData.insumos : INITIAL_INSUMOS
+  );
   const [auditoria, setAuditoria] = useState<AuditoriaLog[]>(
     Array.isArray(localData.auditoria) ? localData.auditoria : INITIAL_AUDITORIA
   );
@@ -514,6 +528,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         simulaciones,
         exposiciones,
         transacciones,
+        insumos,
         auditoria,
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
@@ -533,6 +548,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     simulaciones,
     exposiciones,
     transacciones,
+    insumos,
     auditoria,
   ]);
 
@@ -809,6 +825,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setGestaciones((prev) => prev.filter((g) => g.criaderoId !== newCriaderoId));
         setRegistrosSanitarios((prev) => prev.filter((r) => r.criaderoId !== newCriaderoId));
         setTransacciones((prev) => prev.filter((t) => t.criaderoId !== newCriaderoId));
+        setInsumos((prev) => prev.filter((i) => i.criaderoId !== newCriaderoId));
         setCiclosCelo((prev) => prev.filter((c) => c.criaderoId !== newCriaderoId));
         setExposiciones((prev) => prev.filter((e) => e.criaderoId !== newCriaderoId));
       }
@@ -843,6 +860,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setGestaciones(INITIAL_GESTACIONES);
     setRegistrosSanitarios(INITIAL_REGISTROS_SANITARIOS);
     setTransacciones(INITIAL_TRANSACCIONES);
+    setInsumos(INITIAL_INSUMOS);
     setCiclosCelo(INITIAL_CICLOS_CELO);
     setExposiciones(INITIAL_EXPOSICIONES);
     setChats(INITIAL_CHATS);
@@ -1012,7 +1030,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
       unsubs.push(unsubExposiciones);
 
-      // 11. Chats listener (Real-time 1 a 1 entre criadores)
+      // 11. Insumos y Control de Stock listener
+      const insumosRef = collection(db, 'insumos');
+      const qInsumos = query(insumosRef, where('criaderoId', '==', currentCriaderoId));
+
+      const unsubInsumos = onSnapshot(
+        qInsumos,
+        (snap) => {
+          const list: Insumo[] = [];
+          snap.forEach((d) => list.push({ id: d.id, ...d.data() } as Insumo));
+          setInsumos(list);
+        },
+        (error) => handleFirestoreError(error, OperationType.LIST, 'insumos')
+      );
+      unsubs.push(unsubInsumos);
+
+      // 12. Chats listener (Real-time 1 a 1 entre criadores)
       const chatsRef = collection(db, 'chats');
       const isSuperAdminEmail =
         firebaseUser.email?.toLowerCase() === 'claudiobalmaceda.ok@gmail.com' ||
@@ -1390,6 +1423,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         batch.set(doc(db, 'transacciones', t.id), t, { merge: true });
       });
 
+      // Insumos
+      insumos.forEach((i) => {
+        batch.set(doc(db, 'insumos', i.id), i, { merge: true });
+      });
+
       await batch.commit();
 
       // Add audit log
@@ -1460,6 +1498,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const currentTransacciones = useMemo(() => {
     return transacciones.filter((t) => t.criaderoId === currentCriaderoId);
   }, [transacciones, currentCriaderoId]);
+
+  const currentInsumos = useMemo(() => {
+    return insumos.filter((i) => i.criaderoId === currentCriaderoId);
+  }, [insumos, currentCriaderoId]);
 
   // Server-side COI Calculation implementation
   const calculateCOIServer = async (
@@ -2367,6 +2409,166 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // Insumos y Stock Logístico
+  const addInsumo = async (data: Omit<Insumo, 'id' | 'ultimaActualizacion'>): Promise<Insumo> => {
+    const today = new Date().toISOString().split('T')[0];
+    const initialMovimientos: MovimientoInsumo[] = data.historialMovimientos || [
+      {
+        id: `mov-${Date.now()}`,
+        fecha: today,
+        tipo: 'INGRESO',
+        cantidad: data.cantidadActual,
+        motivo: 'Stock inicial registrado en el sistema',
+        usuarioNombre: currentUser.nombre || 'Administrador',
+      },
+    ];
+
+    const newItem: Insumo = {
+      ...data,
+      id: `ins-${Date.now()}`,
+      criaderoId: data.criaderoId || currentCriaderoId,
+      ultimaActualizacion: today,
+      historialMovimientos: initialMovimientos,
+    };
+
+    const cleanItem = cleanForFirestore(newItem) as Insumo;
+    setInsumos((prev) => [cleanItem, ...prev]);
+
+    // LocalStorage sync
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed.insumos)) {
+          parsed.insumos = [cleanItem, ...parsed.insumos.filter((i: any) => i.id !== cleanItem.id)];
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        }
+      }
+    } catch (e) {
+      console.warn('LocalStorage save error for insumo:', e);
+    }
+
+    if (firebaseUser) {
+      try {
+        await setDoc(doc(db, 'insumos', cleanItem.id), cleanItem, { merge: true });
+      } catch (err: any) {
+        console.error('Error guardando insumo en Firestore:', err);
+        handleFirestoreError(err, OperationType.CREATE, 'insumos');
+      }
+    }
+
+    return cleanItem;
+  };
+
+  const updateInsumo = async (id: string, updates: Partial<Insumo>): Promise<void> => {
+    const today = new Date().toISOString().split('T')[0];
+    const cleanUpdates = cleanForFirestore({
+      ...updates,
+      ultimaActualizacion: today,
+    });
+
+    setInsumos((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, ...cleanUpdates, ultimaActualizacion: today } : item))
+    );
+
+    // LocalStorage sync
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed.insumos)) {
+          parsed.insumos = parsed.insumos.map((i: any) => (i.id === id ? { ...i, ...cleanUpdates, ultimaActualizacion: today } : i));
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        }
+      }
+    } catch (e) {
+      console.warn('LocalStorage update error for insumo:', e);
+    }
+
+    if (firebaseUser) {
+      try {
+        await updateDoc(doc(db, 'insumos', id), cleanUpdates);
+      } catch (err: any) {
+        console.error('Error actualizando insumo en Firestore:', err);
+        handleFirestoreError(err, OperationType.UPDATE, 'insumos');
+      }
+    }
+  };
+
+  const deleteInsumo = async (id: string): Promise<boolean> => {
+    setInsumos((prev) => prev.filter((item) => item.id !== id));
+
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed.insumos)) {
+          parsed.insumos = parsed.insumos.filter((i: any) => i.id !== id);
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        }
+      }
+    } catch (e) {
+      console.warn('LocalStorage delete error for insumo:', e);
+    }
+
+    if (firebaseUser) {
+      try {
+        await deleteDoc(doc(db, 'insumos', id));
+      } catch (err: any) {
+        console.error('Error eliminando insumo en Firestore:', err);
+        handleFirestoreError(err, OperationType.DELETE, 'insumos');
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const registrarConsumoInsumo = async (id: string, cantidad: number, motivo?: string): Promise<void> => {
+    const existing = insumos.find((i) => i.id === id);
+    if (!existing) return;
+
+    const nuevaCantidad = Math.max(0, existing.cantidadActual - cantidad);
+    const today = new Date().toISOString().split('T')[0];
+    const nuevoMovimiento: MovimientoInsumo = {
+      id: `mov-${Date.now()}`,
+      fecha: today,
+      tipo: 'CONSUMO',
+      cantidad,
+      motivo: motivo || 'Consumo operativo',
+      usuarioNombre: currentUser.nombre || 'Administrador',
+    };
+
+    const updatedMovimientos = [nuevoMovimiento, ...(existing.historialMovimientos || [])];
+
+    await updateInsumo(id, {
+      cantidadActual: nuevaCantidad,
+      historialMovimientos: updatedMovimientos,
+    });
+  };
+
+  const ajustarStockInsumo = async (id: string, nuevaCantidad: number, motivo?: string): Promise<void> => {
+    const existing = insumos.find((i) => i.id === id);
+    if (!existing) return;
+
+    const diferencia = nuevaCantidad - existing.cantidadActual;
+    const today = new Date().toISOString().split('T')[0];
+    const nuevoMovimiento: MovimientoInsumo = {
+      id: `mov-${Date.now()}`,
+      fecha: today,
+      tipo: diferencia >= 0 ? 'INGRESO' : 'AJUSTE',
+      cantidad: Math.abs(diferencia),
+      motivo: motivo || (diferencia >= 0 ? 'Ingreso o reposición de stock' : 'Ajuste manual de inventario'),
+      usuarioNombre: currentUser.nombre || 'Administrador',
+    };
+
+    const updatedMovimientos = [nuevoMovimiento, ...(existing.historialMovimientos || [])];
+
+    await updateInsumo(id, {
+      cantidadActual: Math.max(0, nuevaCantidad),
+      historialMovimientos: updatedMovimientos,
+    });
+  };
+
   // Criaderos
   const addCriadero = (data: Omit<Criadero, 'id' | 'createdAt'>) => {
     const c: Criadero = {
@@ -2701,8 +2903,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         camadas: currentCamadas,
         cachorros: currentCachorros,
         simulaciones: currentSimulaciones,
-        exposiciones: currentExposiciones,
+         exposiciones: currentExposiciones,
         transacciones: currentTransacciones,
+        insumos: currentInsumos,
         auditoria,
         notificaciones,
         addEjemplar,
@@ -2741,6 +2944,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteExposicion,
         addTransaccion,
         deleteTransaccion,
+        addInsumo,
+        updateInsumo,
+        deleteInsumo,
+        registrarConsumoInsumo,
+        ajustarStockInsumo,
         addCriadero,
         updateCriadero,
         deleteCriadero,

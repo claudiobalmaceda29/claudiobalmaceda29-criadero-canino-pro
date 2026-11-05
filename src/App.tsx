@@ -25,6 +25,7 @@ import { SuperAdminView } from './components/superadmin/SuperAdminView';
 import { BackupSystemView } from './components/backup/BackupSystemView';
 import { SettingsView } from './components/settings/SettingsView';
 import { ChatView } from './components/chat/ChatView';
+import { InsumosStockView } from './components/inventory/InsumosStockView';
 
 const MainLayout: React.FC = () => {
   const {
@@ -73,6 +74,8 @@ const MainLayout: React.FC = () => {
         return <CertificatesView />;
       case 'economia':
         return <EconomicsView />;
+      case 'insumos':
+        return <InsumosStockView />;
       case 'sanidad':
         return <HealthView />;
       case 'estadisticas':

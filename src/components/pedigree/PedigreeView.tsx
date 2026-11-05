@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { DocumentPreviewModal } from '../common/DocumentPreviewModal';
 import { DogDetailModal } from '../dogs/DogDetailModal';
+import { VisualPedigreeTree } from './VisualPedigreeTree';
 import { parsePedigreeFile } from '../../lib/pdfPedigreeParser';
 import { persistPedigreeDocument, resolveDocumentUrl } from '../../lib/documentStorage';
 
@@ -463,111 +464,12 @@ export const PedigreeView: React.FC = () => {
               )}
             </div>
 
-            {/* Tree Branching Grid */}
-            {(() => {
-              const fatherDog =
-                (selectedDog.padreId && findDogInSystem(selectedDog.padreId)) ||
-                findDogInSystem(selectedDog.padreNombre);
-              const motherDog =
-                (selectedDog.madreId && findDogInSystem(selectedDog.madreId)) ||
-                findDogInSystem(selectedDog.madreNombre);
-
-              const finalAbueloPaterno = selectedDog.abueloPaterno || fatherDog?.padreNombre;
-              const finalAbuelaPaterna = selectedDog.abuelaPaterna || fatherDog?.madreNombre;
-              const finalAbueloMaterno = selectedDog.abueloMaterno || motherDog?.padreNombre;
-              const finalAbuelaMaterna = selectedDog.abuelaMaterna || motherDog?.madreNombre;
-
-              const abueloPaternoDog = findDogInSystem(fatherDog?.padreId) || findDogInSystem(finalAbueloPaterno);
-              const abuelaPaternaDog = findDogInSystem(fatherDog?.madreId) || findDogInSystem(finalAbuelaPaterna);
-              const abueloMaternoDog = findDogInSystem(motherDog?.padreId) || findDogInSystem(finalAbueloMaterno);
-              const abuelaMaternaDog = findDogInSystem(motherDog?.madreId) || findDogInSystem(finalAbuelaMaterna);
-
-              const finalPpP = selectedDog.bisabuelos?.pp_p || fatherDog?.bisabuelos?.pp_p || fatherDog?.abueloPaterno || abueloPaternoDog?.padreNombre;
-              const finalPpM = selectedDog.bisabuelos?.pp_m || fatherDog?.bisabuelos?.pp_m || fatherDog?.abuelaPaterna || abueloPaternoDog?.madreNombre;
-              const finalPmP = selectedDog.bisabuelos?.pm_p || fatherDog?.bisabuelos?.pm_p || fatherDog?.abueloMaterno || abuelaPaternaDog?.padreNombre;
-              const finalPmM = selectedDog.bisabuelos?.pm_m || fatherDog?.bisabuelos?.pm_m || fatherDog?.abuelaMaterna || abuelaPaternaDog?.madreNombre;
-
-              const finalMpP = selectedDog.bisabuelos?.mp_p || motherDog?.bisabuelos?.mp_p || motherDog?.abueloPaterno || abueloMaternoDog?.padreNombre;
-              const finalMpM = selectedDog.bisabuelos?.mp_m || motherDog?.bisabuelos?.mp_m || motherDog?.abuelaPaterna || abueloMaternoDog?.madreNombre;
-              const finalMmP = selectedDog.bisabuelos?.mm_p || motherDog?.bisabuelos?.mm_p || motherDog?.abueloMaterno || abuelaMaternaDog?.padreNombre;
-              const finalMmM = selectedDog.bisabuelos?.mm_m || motherDog?.bisabuelos?.mm_m || motherDog?.abuelaMaterna || abuelaMaternaDog?.madreNombre;
-
-              return (
-                <div className="grid grid-cols-1 gap-6">
-                  {/* SIRE BRANCH (PADRE) */}
-                  <div className="p-4 rounded-2xl bg-blue-50/40 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/50 space-y-4">
-                    <div className="flex items-center justify-between border-b border-blue-100 dark:border-blue-900/40 pb-2">
-                      <span className="text-xs font-black uppercase tracking-wider text-blue-800 dark:text-blue-300 flex items-center gap-1.5">
-                        <Award className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                        LÍNEA PATERNA (PADRE Y ANTEPASADOS)
-                      </span>
-                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                        {generationsCount === 4 ? '3 Generaciones de Antepasados' : '2 Generaciones de Antepasados'}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      {/* Father (1st Gen) */}
-                      <div className="flex flex-col justify-center">
-                        {renderAncestorNode('PADRE', selectedDog.padreNombre, selectedDog.padreId, true, 'SIRE')}
-                      </div>
-
-                      {/* Grandparents (2nd Gen) */}
-                      <div className="space-y-2">
-                        {renderAncestorNode('ABUELO PATERNO', finalAbueloPaterno, undefined, false, 'SIRE')}
-                        {renderAncestorNode('ABUELA PATERNA', finalAbuelaPaterna, undefined, false, 'SIRE')}
-                      </div>
-
-                      {/* Great-Grandparents (3rd / 4th Gen) */}
-                      {generationsCount === 4 && (
-                        <div className="space-y-1.5 text-[11px]">
-                          {renderAncestorNode('BISABUELO', finalPpP, undefined, false, 'SIRE')}
-                          {renderAncestorNode('BISABUELA', finalPpM, undefined, false, 'SIRE')}
-                          {renderAncestorNode('BISABUELO', finalPmP, undefined, false, 'SIRE')}
-                          {renderAncestorNode('BISABUELA', finalPmM, undefined, false, 'SIRE')}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* DAM BRANCH (MADRE) */}
-                  <div className="p-4 rounded-xl bg-rose-50/40 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50 space-y-4">
-                    <div className="flex items-center justify-between border-b border-rose-100 dark:border-rose-900/40 pb-2">
-                      <span className="text-xs font-black uppercase tracking-wider text-rose-800 dark:text-rose-300 flex items-center gap-1.5">
-                        <Award className="w-4 h-4 text-rose-600 dark:text-rose-400" />
-                        LÍNEA MATERNA (MADRE Y ANTEPASADOS)
-                      </span>
-                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                        {generationsCount === 4 ? '3 Generaciones de Antepasados' : '2 Generaciones de Antepasados'}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      {/* Mother (1st Gen) */}
-                      <div className="flex flex-col justify-center">
-                        {renderAncestorNode('MADRE', selectedDog.madreNombre, selectedDog.madreId, true, 'DAM')}
-                      </div>
-
-                      {/* Grandparents (2nd Gen) */}
-                      <div className="space-y-2">
-                        {renderAncestorNode('ABUELO MATERNO', finalAbueloMaterno, undefined, false, 'DAM')}
-                        {renderAncestorNode('ABUELA MATERNA', finalAbuelaMaterna, undefined, false, 'DAM')}
-                      </div>
-
-                      {/* Great-Grandparents (3rd / 4th Gen) */}
-                      {generationsCount === 4 && (
-                        <div className="space-y-1.5 text-[11px]">
-                          {renderAncestorNode('BISABUELO', finalMpP, undefined, false, 'DAM')}
-                          {renderAncestorNode('BISABUELA', finalMpM, undefined, false, 'DAM')}
-                          {renderAncestorNode('BISABUELO', finalMmP, undefined, false, 'DAM')}
-                          {renderAncestorNode('BISABUELA', finalMmM, undefined, false, 'DAM')}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
+            {/* Organigrama Genealógico Interactivo 4 Generaciones */}
+            <VisualPedigreeTree
+              subjectDog={selectedDog}
+              onSelectDog={(d) => setSelectedDogId(d.id)}
+              onViewDogDetail={(d) => setViewingDetailDog(d)}
+            />
           </div>
         </div>
       ) : (

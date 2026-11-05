@@ -45,6 +45,7 @@ import {
   ExposicionPOA,
   TransaccionEconomica,
   AuditoriaLog,
+  Insumo,
 } from '../types';
 
 // ==========================================
@@ -113,6 +114,7 @@ export const COLLECTIONS = {
   EXPOSICIONES: 'exposiciones',
   TRANSACCIONES: 'transacciones',
   AUDITORIA: 'auditoria',
+  INSUMOS: 'insumos',
 } as const;
 
 // Generic typed converter helper
@@ -208,6 +210,11 @@ export const auditoriaCollection = collection(
   db,
   COLLECTIONS.AUDITORIA
 ).withConverter(createConverter<AuditoriaLog>());
+
+export const insumosCollection = collection(
+  db,
+  COLLECTIONS.INSUMOS
+).withConverter(createConverter<Insumo>());
 
 // ==========================================
 // 6. Security & Audit Error Handling

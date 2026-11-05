@@ -132,6 +132,33 @@
         "leido": { "type": "boolean" }
       },
       "required": ["id", "chatId", "senderUid", "senderCriaderoId", "texto", "timestamp"]
+    },
+    "Insumo": {
+      "title": "Insumo",
+      "description": "Insumos, alimentos, vacunas y stock logístico del criadero",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "criaderoId": { "type": "string" },
+        "nombre": { "type": "string" },
+        "categoria": { "type": "string" },
+        "marca": { "type": "string" },
+        "cantidadActual": { "type": "number" },
+        "unidadMedida": { "type": "string" },
+        "stockMinimo": { "type": "number" },
+        "ubicacion": { "type": "string" },
+        "temperaturaHeladera": { "type": "string" },
+        "lote": { "type": "string" },
+        "fechaVencimiento": { "type": "string" },
+        "pesoPorUnidadKg": { "type": "number" },
+        "consumoDiarioEstimado": { "type": "number" },
+        "costoUnitario": { "type": "number" },
+        "moneda": { "type": "string", "enum": ["ARS", "USD"] },
+        "proveedor": { "type": "string" },
+        "observaciones": { "type": "string" },
+        "ultimaActualizacion": { "type": "string" }
+      },
+      "required": ["id", "criaderoId", "nombre", "categoria", "cantidadActual", "unidadMedida"]
     }
   },
   "firestore": {
@@ -162,6 +189,10 @@
     "/chats/{chatId}/messages/{messageId}": {
       "schema": "ChatMessage",
       "description": "Mensajes individuales del chat"
+    },
+    "/insumos/{insumoId}": {
+      "schema": "Insumo",
+      "description": "Inventario de alimentos, vacunas, pipetas y medicamentos"
     }
   }
 }
