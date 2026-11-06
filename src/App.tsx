@@ -44,7 +44,8 @@ const MainLayout: React.FC = () => {
   useEffect(() => {
     if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
       navigator.serviceWorker
-        .register('/sw.js')
+        .register('/sw.js', { updateViaCache: 'none' })
+        .then((reg) => reg.update())
         .catch((err) => console.log('Service worker registration failed:', err));
     }
   }, []);
