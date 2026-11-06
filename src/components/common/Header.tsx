@@ -20,6 +20,7 @@ import {
   RotateCcw,
   LogIn,
 } from 'lucide-react';
+import { NotificationBell } from './NotificationBell';
 
 interface HeaderProps {
   onToggleMobileMenu: () => void;
@@ -190,78 +191,8 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileMenu }) => {
             )}
           </button>
 
-          {/* Notifications with Red Count Badge matching screenshot */}
-          <div className="relative">
-            <button
-              onClick={() => setShowNotifications((prev) => !prev)}
-              className="p-2 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer relative"
-              title="Centro de Notificaciones"
-            >
-              <Bell className="w-4 h-4" />
-              {unreadNotifs.length > 0 && (
-                <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-red-500 text-white font-black text-[9px] flex items-center justify-center ring-2 ring-white dark:ring-slate-900 shadow-xs">
-                  {unreadNotifs.length}
-                </span>
-              )}
-            </button>
-
-            {/* Notification dropdown */}
-            {showNotifications && (
-              <div
-                className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl z-50 overflow-hidden animate-in fade-in duration-150"
-                onMouseLeave={() => setShowNotifications(false)}
-              >
-                <div className="p-3.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-950">
-                  <div className="flex items-center gap-2">
-                    <Bell className="w-4 h-4 text-blue-600" />
-                    <span className="font-bold text-xs text-slate-800 dark:text-white">
-                      Notificaciones ({unreadNotifs.length})
-                    </span>
-                  </div>
-                  {unreadNotifs.length > 0 && (
-                    <button
-                      onClick={marcarTodasNotificacionesLeidas}
-                      className="text-[11px] text-blue-600 font-semibold hover:underline"
-                    >
-                      Marcar leídas
-                    </button>
-                  )}
-                </div>
-                <div className="max-h-72 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
-                  {unreadNotifs.length > 0 ? (
-                    unreadNotifs.map((n) => (
-                      <div
-                        key={n.id}
-                        onClick={() => {
-                          marcarNotificacionLeida(n.id);
-                          if (n.enlaceTab) {
-                            setActiveTab(n.enlaceTab);
-                            setShowNotifications(false);
-                          }
-                        }}
-                        className="p-3 hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer text-xs space-y-1"
-                      >
-                        <div className="font-bold text-slate-800 dark:text-white flex items-center justify-between">
-                          <span>{n.titulo}</span>
-                          {n.tipo === 'CHAT' && (
-                            <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold">
-                              Chat
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-slate-500 dark:text-slate-400 text-[11px]">{n.mensaje}</p>
-                        <span className="text-[10px] text-slate-400 font-mono">{n.fecha}</span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="p-6 text-center text-xs text-slate-400">
-                      No hay notificaciones pendientes. Todo al día.
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+          {/* Notifications Bell with Firestore subcollection listener & toast alerts */}
+          <NotificationBell userId={firebaseUser?.uid || currentUser?.id} />
 
           {/* Help Button (?) matching reference image */}
           <button

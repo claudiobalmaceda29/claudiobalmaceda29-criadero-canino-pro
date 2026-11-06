@@ -51,6 +51,10 @@ service cloud.firestore {
       allow create: if isSignedIn() && (isUserSelf(userId) || isSuperAdmin());
       allow update: if isSignedIn() && (isUserSelf(userId) || isSuperAdmin());
       allow delete: if isSuperAdmin();
+
+      match /notificaciones/{notificacionId} {
+        allow read, write: if isSignedIn() && (isUserSelf(userId) || isSuperAdmin());
+      }
     }
 
     match /usuarios/{userId} {
@@ -58,6 +62,10 @@ service cloud.firestore {
       allow list: if isSignedIn();
       allow create, update: if isSignedIn() && (isUserSelf(userId) || isSuperAdmin());
       allow delete: if isSuperAdmin();
+
+      match /notificaciones/{notificacionId} {
+        allow read, write: if isSignedIn() && (isUserSelf(userId) || isSuperAdmin());
+      }
     }
 
     // Criaderos: each breeder accesses strictly their own criadero

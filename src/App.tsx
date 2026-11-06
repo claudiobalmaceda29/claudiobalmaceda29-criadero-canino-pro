@@ -5,6 +5,7 @@ import { Sidebar } from './components/common/Sidebar';
 import { GlobalSearchModal } from './components/common/GlobalSearchModal';
 import { PrintModal } from './components/common/PrintModal';
 import { RegisterKennelModal } from './components/auth/RegisterKennelModal';
+import { Toaster } from 'react-hot-toast';
 
 // Views
 import { DashboardView } from './components/dashboard/DashboardView';
@@ -139,10 +140,11 @@ const MainLayout: React.FC = () => {
         </main>
       </div>
 
-      {/* Global Modals */}
+      {/* Global Modals & Notifications Toast */}
       <GlobalSearchModal />
       <PrintModal />
       <RegisterKennelModal />
+      <Toaster position="top-right" reverseOrder={false} />
     </div>
   );
 };
