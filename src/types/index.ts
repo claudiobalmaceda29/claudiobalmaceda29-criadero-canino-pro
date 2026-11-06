@@ -55,6 +55,7 @@ export type CalificacionDisplasiaCodo =
 export interface Ejemplar {
   id: string;
   criaderoId: string;
+  propietarioId?: string;
   nombreCompleto: string;
   afijo: string;
   sexo: Sexo;
@@ -290,6 +291,7 @@ export interface PesajeCachorro {
 export interface Cachorro {
   id: string;
   criaderoId: string;
+  propietarioId?: string;
   camadaId: string;
   camadaNombre: string;
   tipoRegistro?: TipoRegistroCachorro; // 'PRENATAL' para reservas antes de nacer o 'NACIDO'

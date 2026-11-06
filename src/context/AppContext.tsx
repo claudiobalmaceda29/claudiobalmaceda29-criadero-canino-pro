@@ -128,6 +128,8 @@ interface AppContextType {
   // Active view tab navigation
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  isGlobalAdminView: boolean;
+  setIsGlobalAdminView: (val: boolean) => void;
 
   // Entities (scoped to current criadero where applicable)
   ejemplares: Ejemplar[];
@@ -430,6 +432,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Default active user is DEMO visitor on fresh page load
   const [currentUser, setCurrentUser] = useState<User>(DEMO_USER);
+  // Control de vista global para SUPER_ADMIN (permite alternar entre ver todos los criaderos o el criadero activo)
+  const [isGlobalAdminView, setIsGlobalAdminView] = useState<boolean>(false);
 
   // Read-only guard for demo account to protect sample data
   const isReadOnlyDemo = useMemo(() => {
@@ -919,8 +923,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         firebaseUser.email?.toLowerCase() === 'claudiobalmaceda.ok@gmail.com' ||
         currentUser.rol === 'SUPER_ADMIN';
 
-      // Identificador de criadero / tenant estricto: prioritariamente firebaseUser.uid (o currentUser.uid)
-      const activeTenantUid = firebaseUser?.uid || currentUser?.uid || currentUser?.id || currentCriaderoId;
+      // Identificadores válidos para aislamiento multi-tenant simétrico
+      const userKennelId = currentUser?.criaderoId || currentCriaderoId;
+      const userUid = firebaseUser?.uid;
+      const userCustomId = currentUser?.id;
+      const userAltUid = (currentUser as any)?.uid;
+      const validCriaderoIds = Array.from(
+        new Set([userKennelId, currentCriaderoId, userUid, userCustomId, userAltUid].filter(Boolean))
+      ) as string[];
+
+      // Helper unificado para construir consultas simétricas y consistentes entre colecciones y roles
+      const buildTenantQuery = (collRef: any) => {
+        if (isSuperAdminEmail) {
+          return query(collRef);
+        }
+        if (validCriaderoIds.length === 1) {
+          return query(collRef, where('criaderoId', '==', validCriaderoIds[0]));
+        }
+        return query(collRef, where('criaderoId', 'in', validCriaderoIds.slice(0, 10)));
+      };
 
       // 1. Criaderos listener
       const criaderosRef = collection(db, 'criaderos');
@@ -928,7 +949,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         criaderosRef,
         (snap) => {
           const list: Criadero[] = [];
-          snap.forEach((d) => list.push({ id: d.id, ...d.data() } as Criadero));
+          snap.forEach((d) => list.push({ id: d.id, ...(d.data() as any) } as Criadero));
           if (list.length > 0) {
             setCriaderos(list);
           }
@@ -937,36 +958,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
       unsubs.push(unsubCriaderos);
 
-      // 2. Ejemplares listener (filtered strictly by current criadero or user uid)
+      // 2. Ejemplares listener (Simétrico: todos para SUPER_ADMIN, por criaderoId para usuario normal)
       const ejemplaresRef = collection(db, 'ejemplares');
-      const validCriaderoIds = [currentCriaderoId];
-      if (currentUser?.id && !validCriaderoIds.includes(currentUser.id)) validCriaderoIds.push(currentUser.id);
-      if (firebaseUser?.uid && !validCriaderoIds.includes(firebaseUser.uid)) validCriaderoIds.push(firebaseUser.uid);
-
-      const qEjemplares = query(ejemplaresRef, where('criaderoId', 'in', validCriaderoIds));
+      const qEjemplares = buildTenantQuery(ejemplaresRef);
 
       const unsubEjemplares = onSnapshot(
         qEjemplares,
         (snap) => {
           const list: Ejemplar[] = [];
-          snap.forEach((d) => list.push({ id: d.id, ...d.data() } as Ejemplar));
+          snap.forEach((d) => list.push({ id: d.id, ...(d.data() as any) } as Ejemplar));
           setEjemplares(list);
         },
         (error) => handleFirestoreError(error, OperationType.LIST, 'ejemplares')
       );
       unsubs.push(unsubEjemplares);
 
-      // 3. Camadas listener (Aislamiento estricto multi-tenant por criaderoId == currentUser.uid)
+      // 3. Camadas listener (Simétrico: todos para SUPER_ADMIN, por criaderoId para usuario normal)
       const camadasRef = collection(db, 'camadas');
-      const qCamadas = isSuperAdminEmail
-        ? query(camadasRef)
-        : query(camadasRef, where('criaderoId', '==', activeTenantUid));
+      const qCamadas = buildTenantQuery(camadasRef);
 
       const unsubCamadas = onSnapshot(
         qCamadas,
         (snap) => {
           const list: Camada[] = [];
-          snap.forEach((d) => list.push({ id: d.id, ...d.data() } as Camada));
+          snap.forEach((d) => list.push({ id: d.id, ...(d.data() as any) } as Camada));
           setCamadas(list);
         },
         (error) => handleFirestoreError(error, OperationType.LIST, 'camadas')
@@ -975,15 +990,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // 4. Cachorros listener
       const cachorrosRef = collection(db, 'cachorros');
-      const qCachorros = isSuperAdminEmail
-        ? query(cachorrosRef)
-        : query(cachorrosRef, where('criaderoId', '==', activeTenantUid));
+      const qCachorros = buildTenantQuery(cachorrosRef);
 
       const unsubCachorros = onSnapshot(
         qCachorros,
         (snap) => {
           const list: Cachorro[] = [];
-          snap.forEach((d) => list.push({ id: d.id, ...d.data() } as Cachorro));
+          snap.forEach((d) => list.push({ id: d.id, ...(d.data() as any) } as Cachorro));
           setCachorros(list);
         },
         (error) => handleFirestoreError(error, OperationType.LIST, 'cachorros')
@@ -992,30 +1005,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // 5. Montas listener
       const montasRef = collection(db, 'montas');
-      const qMontas = query(montasRef, where('criaderoId', '==', currentCriaderoId));
+      const qMontas = buildTenantQuery(montasRef);
 
       const unsubMontas = onSnapshot(
         qMontas,
         (snap) => {
           const list: Monta[] = [];
-          snap.forEach((d) => list.push({ id: d.id, ...d.data() } as Monta));
+          snap.forEach((d) => list.push({ id: d.id, ...(d.data() as any) } as Monta));
           setMontas(list);
         },
         (error) => handleFirestoreError(error, OperationType.LIST, 'montas')
       );
       unsubs.push(unsubMontas);
 
-      // 6. Gestaciones listener (Aislamiento estricto multi-tenant por criaderoId == currentUser.uid)
+      // 6. Gestaciones listener
       const gestacionesRef = collection(db, 'gestaciones');
-      const qGestaciones = isSuperAdminEmail
-        ? query(gestacionesRef)
-        : query(gestacionesRef, where('criaderoId', '==', activeTenantUid));
+      const qGestaciones = buildTenantQuery(gestacionesRef);
 
       const unsubGest = onSnapshot(
         qGestaciones,
         (snap) => {
           const list: Gestacion[] = [];
-          snap.forEach((d) => list.push({ id: d.id, ...d.data() } as Gestacion));
+          snap.forEach((d) => list.push({ id: d.id, ...(d.data() as any) } as Gestacion));
           setGestaciones(list);
         },
         (error) => handleFirestoreError(error, OperationType.LIST, 'gestaciones')
@@ -1024,7 +1035,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // 7. Registros Sanitarios listener
       const registrosRef = collection(db, 'registrosSanitarios');
-      const qRegistros = query(registrosRef, where('criaderoId', '==', currentCriaderoId));
+      const qRegistros = buildTenantQuery(registrosRef);
 
       const unsubRegistros = onSnapshot(
         qRegistros,
@@ -1037,11 +1048,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
       unsubs.push(unsubRegistros);
 
-      // 8. Transacciones Económicas / Balances listener (Aislamiento estricto multi-tenant por criaderoId == currentUser.uid)
+      // 8. Transacciones Económicas / Balances listener
       const transaccionesRef = collection(db, 'transacciones');
-      const qTransacciones = isSuperAdminEmail
-        ? query(transaccionesRef)
-        : query(transaccionesRef, where('criaderoId', '==', activeTenantUid));
+      const qTransacciones = buildTenantQuery(transaccionesRef);
 
       const unsubTransacciones = onSnapshot(
         qTransacciones,
@@ -1056,7 +1065,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // 9. Ciclos Celo listener
       const ciclosRef = collection(db, 'ciclosCelo');
-      const qCiclos = query(ciclosRef, where('criaderoId', '==', currentCriaderoId));
+      const qCiclos = buildTenantQuery(ciclosRef);
 
       const unsubCiclos = onSnapshot(
         qCiclos,
@@ -1071,7 +1080,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // 10. Exposiciones listener
       const exposicionesRef = collection(db, 'exposiciones');
-      const qExposiciones = query(exposicionesRef, where('criaderoId', '==', currentCriaderoId));
+      const qExposiciones = buildTenantQuery(exposicionesRef);
 
       const unsubExposiciones = onSnapshot(
         qExposiciones,
@@ -1084,17 +1093,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
       unsubs.push(unsubExposiciones);
 
-      // 11. Insumos y Control de Stock listener (Aislamiento estricto multi-tenant por criaderoId == currentUser.uid)
+      // 11. Insumos y Control de Stock listener
       const insumosRef = collection(db, 'insumos');
-      const qInsumos = isSuperAdminEmail
-        ? query(insumosRef)
-        : query(insumosRef, where('criaderoId', '==', activeTenantUid));
+      const qInsumos = buildTenantQuery(insumosRef);
 
       const unsubInsumos = onSnapshot(
         qInsumos,
         (snap) => {
           const list: Insumo[] = [];
-          snap.forEach((d) => list.push({ id: d.id, ...d.data() } as Insumo));
+          snap.forEach((d) => list.push({ id: d.id, ...(d.data() as any) } as Insumo));
           setInsumos(list);
         },
         (error) => handleFirestoreError(error, OperationType.LIST, 'insumos')
@@ -1505,68 +1512,73 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return criaderos.find((c) => c.id === currentCriaderoId) || criaderos[0];
   }, [criaderos, currentCriaderoId]);
 
-  // Scoped lists - strictly filtered to currentCriaderoId or user uid for multi-tenant isolation
-  const currentEjemplares = useMemo(() => {
-    return ejemplares.filter(
-      (e) =>
-        e.criaderoId === currentCriaderoId ||
-        (currentUser?.id && e.criaderoId === currentUser.id) ||
-        ((currentUser as any)?.uid && e.criaderoId === (currentUser as any).uid) ||
-        (firebaseUser?.uid && e.criaderoId === firebaseUser.uid)
+  // Multi-criadero Security & Authorization Helper
+  const isSuperAdminUser = useMemo(() => {
+    return (
+      currentUser.rol === 'SUPER_ADMIN' ||
+      currentUser.email?.toLowerCase() === 'admin@criaderodemo.com.ar' ||
+      currentUser.email?.toLowerCase() === 'claudiobalmaceda.ok@gmail.com' ||
+      firebaseUser?.email?.toLowerCase() === 'admin@criaderodemo.com.ar' ||
+      firebaseUser?.email?.toLowerCase() === 'claudiobalmaceda.ok@gmail.com'
     );
-  }, [ejemplares, currentCriaderoId, currentUser, firebaseUser]);
+  }, [currentUser, firebaseUser]);
 
-  const currentRegistros = useMemo(() => {
-    return registrosSanitarios.filter((r) => r.criaderoId === currentCriaderoId);
-  }, [registrosSanitarios, currentCriaderoId]);
+  const canManageCriaderoResource = useCallback(
+    (resourceCriaderoId?: string): boolean => {
+      if (isSuperAdminUser) return true;
+      if (!resourceCriaderoId) return true;
+      if (resourceCriaderoId === currentCriaderoId) return true;
+      if (currentUser?.id && resourceCriaderoId === currentUser.id) return true;
+      if ((currentUser as any)?.uid && resourceCriaderoId === (currentUser as any).uid) return true;
+      if (firebaseUser?.uid && resourceCriaderoId === firebaseUser.uid) return true;
+      if (auth.currentUser?.uid && resourceCriaderoId === auth.currentUser.uid) return true;
+      return false;
+    },
+    [isSuperAdminUser, currentCriaderoId, currentUser, firebaseUser]
+  );
 
-  const currentMontas = useMemo(() => {
-    return montas.filter((m) => m.criaderoId === currentCriaderoId);
-  }, [montas, currentCriaderoId]);
+  // Helper unificado de coincidencia multi-tenant simétrico para todas las listas y vistas
+  const matchesCriadero = useCallback(
+    (item: { criaderoId?: string; propietarioId?: string }) => {
+      // 1. Si es SuperAdmin y tiene activada la Vista Global de la plataforma o seleccionó 'ALL'
+      if (isSuperAdminUser && (isGlobalAdminView || currentCriaderoId === 'ALL')) {
+        return true;
+      }
 
-  const currentCiclos = useMemo(() => {
-    return ciclosCelo.filter((c) => c.criaderoId === currentCriaderoId);
-  }, [ciclosCelo, currentCriaderoId]);
+      // 2. Coincidencia con el criadero activo actual
+      if (item.criaderoId && item.criaderoId === currentCriaderoId) return true;
+      if (item.propietarioId && item.propietarioId === currentCriaderoId) return true;
 
-  const currentGestaciones = useMemo(() => {
-    return gestaciones.filter((g) => g.criaderoId === currentCriaderoId);
-  }, [gestaciones, currentCriaderoId]);
+      // 3. Coincidencia con las credenciales / IDs del usuario actual
+      if (currentUser?.criaderoId && item.criaderoId === currentUser.criaderoId) return true;
+      if (currentUser?.id && item.criaderoId === currentUser.id) return true;
+      if ((currentUser as any)?.uid && item.criaderoId === (currentUser as any).uid) return true;
+      if (firebaseUser?.uid && item.criaderoId === firebaseUser.uid) return true;
 
-  const currentCamadas = useMemo(() => {
-    return camadas.filter((c) => c.criaderoId === currentCriaderoId);
-  }, [camadas, currentCriaderoId]);
+      // 4. Coincidencia con el propietarioId
+      if (item.propietarioId) {
+        if (currentUser?.id && item.propietarioId === currentUser.id) return true;
+        if ((currentUser as any)?.uid && item.propietarioId === (currentUser as any).uid) return true;
+        if (firebaseUser?.uid && item.propietarioId === firebaseUser.uid) return true;
+      }
 
-  const currentCachorros = useMemo(() => {
-    return cachorros.filter((c) => c.criaderoId === currentCriaderoId);
-  }, [cachorros, currentCriaderoId]);
+      return false;
+    },
+    [isSuperAdminUser, isGlobalAdminView, currentCriaderoId, currentUser, firebaseUser]
+  );
 
-  const currentSimulaciones = useMemo(() => {
-    return simulaciones.filter((s) => s.criaderoId === currentCriaderoId);
-  }, [simulaciones, currentCriaderoId]);
-
-  const currentExposiciones = useMemo(() => {
-    return exposiciones.filter((e) => e.criaderoId === currentCriaderoId);
-  }, [exposiciones, currentCriaderoId]);
-
-  const currentTransacciones = useMemo(() => {
-    return transacciones.filter(
-      (t) =>
-        t.criaderoId === currentCriaderoId ||
-        (currentUser?.id && t.criaderoId === currentUser.id) ||
-        (firebaseUser?.uid && t.criaderoId === firebaseUser.uid)
-    );
-  }, [transacciones, currentCriaderoId, currentUser, firebaseUser]);
-
-  const currentInsumos = useMemo(() => {
-    return insumos.filter(
-      (i) =>
-        i.criaderoId === currentCriaderoId ||
-        (currentUser?.id && i.criaderoId === currentUser.id) ||
-        ((currentUser as any)?.uid && i.criaderoId === (currentUser as any).uid) ||
-        (firebaseUser?.uid && i.criaderoId === firebaseUser.uid) ||
-        (i.propietarioId && (i.propietarioId === currentCriaderoId || (firebaseUser?.uid && i.propietarioId === firebaseUser.uid)))
-    );
-  }, [insumos, currentCriaderoId, currentUser, firebaseUser]);
+  // Scoped lists - simétricamente filtradas con matchesCriadero para aislamiento multi-tenant estricto
+  const currentEjemplares = useMemo(() => ejemplares.filter(matchesCriadero), [ejemplares, matchesCriadero]);
+  const currentRegistros = useMemo(() => registrosSanitarios.filter(matchesCriadero), [registrosSanitarios, matchesCriadero]);
+  const currentMontas = useMemo(() => montas.filter(matchesCriadero), [montas, matchesCriadero]);
+  const currentCiclos = useMemo(() => ciclosCelo.filter(matchesCriadero), [ciclosCelo, matchesCriadero]);
+  const currentGestaciones = useMemo(() => gestaciones.filter(matchesCriadero), [gestaciones, matchesCriadero]);
+  const currentCamadas = useMemo(() => camadas.filter(matchesCriadero), [camadas, matchesCriadero]);
+  const currentCachorros = useMemo(() => cachorros.filter(matchesCriadero), [cachorros, matchesCriadero]);
+  const currentSimulaciones = useMemo(() => simulaciones.filter(matchesCriadero), [simulaciones, matchesCriadero]);
+  const currentExposiciones = useMemo(() => exposiciones.filter(matchesCriadero), [exposiciones, matchesCriadero]);
+  const currentTransacciones = useMemo(() => transacciones.filter(matchesCriadero), [transacciones, matchesCriadero]);
+  const currentInsumos = useMemo(() => insumos.filter(matchesCriadero), [insumos, matchesCriadero]);
 
   // Server-side COI Calculation implementation
   const calculateCOIServer = async (
@@ -1687,37 +1699,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Multi-criadero Security & Authorization Helper
-  const isSuperAdminUser = useMemo(() => {
-    return (
-      currentUser.rol === 'SUPER_ADMIN' ||
-      currentUser.email?.toLowerCase() === 'admin@criaderodemo.com.ar' ||
-      currentUser.email?.toLowerCase() === 'claudiobalmaceda.ok@gmail.com'
-    );
-  }, [currentUser]);
-
-  const canManageCriaderoResource = useCallback(
-    (resourceCriaderoId?: string): boolean => {
-      if (isSuperAdminUser) return true;
-      if (!resourceCriaderoId) return true;
-      if (resourceCriaderoId === currentCriaderoId) return true;
-      if (currentUser?.id && resourceCriaderoId === currentUser.id) return true;
-      if ((currentUser as any)?.uid && resourceCriaderoId === (currentUser as any).uid) return true;
-      if (firebaseUser?.uid && resourceCriaderoId === firebaseUser.uid) return true;
-      if (auth.currentUser?.uid && resourceCriaderoId === auth.currentUser.uid) return true;
-      return false;
-    },
-    [isSuperAdminUser, currentCriaderoId, currentUser, firebaseUser]
-  );
-
   // Mutators for Ejemplares
   const addEjemplar = async (data: Omit<Ejemplar, 'id' | 'createdAt'> & { id?: string }): Promise<Ejemplar> => {
     const targetCriaderoId = data.criaderoId || currentCriaderoId || 'cria-demo';
+    const tenantUid = firebaseUser?.uid || currentUser?.uid || currentUser?.id || targetCriaderoId;
     const cleanData = cleanForFirestore(data);
     const newDog: Ejemplar = {
       ...cleanData,
       id: data.id || `dog-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       criaderoId: targetCriaderoId,
+      propietarioId: (cleanData as any).propietarioId || tenantUid,
       createdAt: new Date().toISOString(),
     };
 
@@ -2191,11 +2182,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Camadas
   const addCamada = (data: Omit<Camada, 'id' | 'createdAt'>): Camada => {
-    const tenantUid = currentUser?.uid || firebaseUser?.uid || currentUser?.id || currentCriaderoId;
+    const tenantUid = firebaseUser?.uid || currentUser?.uid || currentUser?.id || currentCriaderoId;
+    const targetCriaderoId = (data as any).criaderoId || currentCriaderoId || tenantUid;
     const c: Camada = {
       ...data,
-      id: `cam-${Date.now()}`,
-      criaderoId: tenantUid, // Inyección automática obligatoria de currentUser.uid
+      id: (data as any).id || `cam-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      criaderoId: targetCriaderoId,
       propietarioId: tenantUid,
       createdAt: new Date().toISOString(),
     };
@@ -2271,10 +2263,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Cachorros
   const addCachorro = (data: Omit<Cachorro, 'id'>): Cachorro => {
+    const tenantUid = firebaseUser?.uid || currentUser?.uid || currentUser?.id || currentCriaderoId;
+    const targetCriaderoId = data.criaderoId || currentCriaderoId || tenantUid;
     const p: Cachorro = {
       ...data,
-      id: `pup-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
-      criaderoId: data.criaderoId || currentCriaderoId,
+      id: (data as any).id || `pup-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+      criaderoId: targetCriaderoId,
+      propietarioId: tenantUid,
     };
     setCachorros((prev) => [p, ...prev]);
     if (firebaseUser) {
@@ -3001,6 +2996,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         registerNewCriadero,
         activeTab,
         setActiveTab,
+        isGlobalAdminView,
+        setIsGlobalAdminView,
         ejemplares: currentEjemplares,
         allEjemplares: ejemplares,
         registrosSanitarios: currentRegistros,

@@ -102,7 +102,8 @@ service cloud.firestore {
       allow list: if isSignedIn() && (
         isSuperAdmin() ||
         resource.data.criaderoId == request.auth.uid ||
-        resource.data.propietarioId == request.auth.uid
+        (resource.data.propietarioId != null && resource.data.propietarioId == request.auth.uid) ||
+        canAccessCriadero(resource.data.criaderoId)
       );
       allow create: if isOwnerOfDoc(request.resource.data);
       allow update: if isOwnerOfDoc(resource.data) && isOwnerOfDoc(request.resource.data);
@@ -151,7 +152,8 @@ service cloud.firestore {
       allow list: if isSignedIn() && (
         isSuperAdmin() ||
         resource.data.criaderoId == request.auth.uid ||
-        resource.data.propietarioId == request.auth.uid
+        (resource.data.propietarioId != null && resource.data.propietarioId == request.auth.uid) ||
+        canAccessCriadero(resource.data.criaderoId)
       );
       allow create: if isOwnerOfDoc(request.resource.data);
       allow update: if isOwnerOfDoc(resource.data) && isOwnerOfDoc(request.resource.data);
@@ -182,7 +184,8 @@ service cloud.firestore {
       allow list: if isSignedIn() && (
         isSuperAdmin() ||
         resource.data.criaderoId == request.auth.uid ||
-        resource.data.propietarioId == request.auth.uid
+        (resource.data.propietarioId != null && resource.data.propietarioId == request.auth.uid) ||
+        canAccessCriadero(resource.data.criaderoId)
       );
       allow create: if isOwnerOfDoc(request.resource.data);
       allow update: if isOwnerOfDoc(resource.data) && isOwnerOfDoc(request.resource.data);
@@ -194,7 +197,8 @@ service cloud.firestore {
       allow list: if isSignedIn() && (
         isSuperAdmin() ||
         resource.data.criaderoId == request.auth.uid ||
-        resource.data.propietarioId == request.auth.uid
+        (resource.data.propietarioId != null && resource.data.propietarioId == request.auth.uid) ||
+        canAccessCriadero(resource.data.criaderoId)
       );
       allow create: if isOwnerOfDoc(request.resource.data);
       allow update: if isOwnerOfDoc(resource.data) && isOwnerOfDoc(request.resource.data);
@@ -207,7 +211,8 @@ service cloud.firestore {
       allow list: if isSignedIn() && (
         isSuperAdmin() ||
         resource.data.criaderoId == request.auth.uid ||
-        resource.data.propietarioId == request.auth.uid
+        (resource.data.propietarioId != null && resource.data.propietarioId == request.auth.uid) ||
+        canAccessCriadero(resource.data.criaderoId)
       );
       allow create: if isOwnerOfDoc(request.resource.data);
       allow update: if isOwnerOfDoc(resource.data) && isOwnerOfDoc(request.resource.data);

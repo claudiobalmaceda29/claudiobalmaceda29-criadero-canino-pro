@@ -22,6 +22,8 @@ import {
   RotateCcw,
   Check,
   X,
+  Globe,
+  Building2,
   Image as ImageIcon,
 } from 'lucide-react';
 
@@ -44,7 +46,22 @@ export const DashboardView: React.FC = () => {
     exposiciones,
     auditoria,
     setActiveTab,
+    currentUser,
+    currentCriadero,
+    isGlobalAdminView,
+    setIsGlobalAdminView,
+    firebaseUser,
   } = useApp();
+
+  const isSuperAdmin = useMemo(() => {
+    return (
+      currentUser.rol === 'SUPER_ADMIN' ||
+      currentUser.email?.toLowerCase() === 'admin@criaderodemo.com.ar' ||
+      currentUser.email?.toLowerCase() === 'claudiobalmaceda.ok@gmail.com' ||
+      firebaseUser?.email?.toLowerCase() === 'claudiobalmaceda.ok@gmail.com' ||
+      firebaseUser?.email?.toLowerCase() === 'admin@criaderodemo.com.ar'
+    );
+  }, [currentUser, firebaseUser]);
 
   const [selectedPeriod, setSelectedPeriod] = useState<'ESTE_ANIO' | 'ESTE_MES' | 'TODO'>('ESTE_ANIO');
   const [selectedBirthYear, setSelectedBirthYear] = useState<string>(() => new Date().getFullYear().toString());
@@ -318,6 +335,59 @@ export const DashboardView: React.FC = () => {
           </select>
         </div>
       </div>
+
+      {/* Selector de Ámbito Multi-Tenant para SUPER_ADMIN */}
+      {isSuperAdmin && (
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white border border-indigo-900/50 shadow-md">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center shrink-0">
+                <ShieldCheck className="w-5 h-5 text-indigo-400" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black uppercase tracking-wider text-indigo-300">
+                    Modo Super Administrador
+                  </span>
+                  <span className="text-[10px] bg-indigo-500/30 text-indigo-200 px-2 py-0.5 rounded-full font-mono border border-indigo-400/30">
+                    Sincronización Multi-Tenant Simétrica
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  Alterná simétricamente entre tu criadero activo ({currentCriadero?.nombre || 'Mi Criadero'}) o la vista global con todos los criaderos del sistema.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5 bg-slate-950/60 p-1 rounded-xl border border-indigo-900/60 shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsGlobalAdminView(false)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  !isGlobalAdminView
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                }`}
+              >
+                <Building2 className="w-3.5 h-3.5" />
+                <span>Mi Criadero ({currentCriadero?.nombre?.slice(0, 16) || 'Activo'})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsGlobalAdminView(true)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  isGlobalAdminView
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                }`}
+              >
+                <Globe className="w-3.5 h-3.5" />
+                <span>Vista Global ({totalEjemplares} ejemp. / {countCamadas} cam.)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Row 1: KPI Cards Grid + Golden Dog Hero Card matching screenshot */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
