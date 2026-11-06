@@ -26,6 +26,7 @@ import {
   Building2,
   Image as ImageIcon,
 } from 'lucide-react';
+import { POADeadlineTrackerWidget } from './POADeadlineTrackerWidget';
 
 /**
  * Imagen principal del Banner del Dashboard (Pastor Alemán en pose de exposición).
@@ -589,6 +590,9 @@ export const DashboardView: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Widget Anti-Multas POA: Gestión de Plazos Fatales */}
+      <POADeadlineTrackerWidget />
 
       {/* Row 2: 3 Cards (Nacimientos y Entregas, Distribución, Próximos Eventos) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">

@@ -314,6 +314,42 @@ export const DailyDashboard: React.FC = () => {
       });
     });
 
+    // 5. Alerta POA de Salud Articular (11.5 meses para Rx de Cadera y Codo con Sedación)
+    ejemplares.forEach((ej) => {
+      if (ej.fechaNacimiento) {
+        const fNac = new Date(ej.fechaNacimiento);
+        const diffDays = Math.floor((today.getTime() - fNac.getTime()) / (1000 * 60 * 60 * 24));
+        const edadMeses = diffDays / 30.4375;
+
+        // Comprobar si ya tiene diagnóstico registrado
+        const norm = (s?: string) => (s || '').toLowerCase();
+        const yaTieneRx =
+          ej.displasiaCadera &&
+          !norm(ej.displasiaCadera).includes('no evaluado') &&
+          !norm(ej.displasiaCadera).includes('sin diagnostico') &&
+          !norm(ej.displasiaCadera).includes('pendiente');
+
+        // Ventana de alerta: entre 11.0 y 13.0 meses (~335 a 395 días)
+        if (edadMeses >= 11.0 && edadMeses <= 13.0 && !yaTieneRx) {
+          const id = `dyn-rx-hded-${ej.id}`;
+          tasks.push({
+            id,
+            criaderoId: currentCriaderoId,
+            tipo: 'CONTROL',
+            titulo: 'Agendar turno veterinario para Rx de Cadera y Codo (Requiere sedación)',
+            descripcion: `El ejemplar ${ej.nombreCompleto} tiene ${edadMeses.toFixed(1)} meses. Según la reglamentación oficial del Club POA y SV, las placas oficiales de cadera (HD) y codo (ED) deben tomarse a partir de los 12 meses bajo anestesia o sedación profunda. Solicitar turno con veterinario autorizado por POA.`,
+            fechaProgramada: todayStr,
+            estado: completedDynamicTaskIds.includes(id) ? 'COMPLETADA' : 'PENDIENTE',
+            prioridad: 'ALTA',
+            entidadRelacionadaTipo: 'EJEMPLAR',
+            entidadRelacionadaId: ej.id,
+            entidadRelacionadaNombre: ej.nombreCompleto,
+            createdAt: todayStr,
+          });
+        }
+      }
+    });
+
     return tasks;
   }, [registrosSanitarios, gestaciones, camadas, ejemplares, insumos, completedDynamicTaskIds, currentCriaderoId]);
 

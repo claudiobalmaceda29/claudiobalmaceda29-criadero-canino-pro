@@ -41,16 +41,31 @@ export type Sexo = 'MACHO' | 'HEMBRA';
 export type EstadoReproductivo = 'ACTIVO' | 'EN_CELO' | 'GESTANTE' | 'EN_DESCANSO' | 'RETIRADO';
 export type EstadoEjemplar = 'ACTIVO' | 'RETIRADO' | 'FALLECIDO' | 'VENDIDO' | 'COPROPIEDAD';
 export type CalificacionDisplasiaCadera = 
+  | 'a1'
+  | 'a2'
+  | 'a3'
+  | 'Mediana'
+  | 'Grave'
   | 'HD "a" Normal (Libre)' 
   | 'HD "a" Casi Normal (Permitido)' 
   | 'HD Permitido (Grado I)' 
   | 'No Evaluado' 
-  | 'Displasia Severa';
+  | 'Displasia Severa'
+  | string;
+
 export type CalificacionDisplasiaCodo = 
+  | 'Normal'
+  | 'Casi Normal'
+  | 'Todavía Permitido'
+  | 'ED 0'
+  | 'ED 1'
+  | 'ED 2'
+  | 'Severa'
   | 'ED "0" Normal (Libre)' 
   | 'ED "1" Casi Normal' 
   | 'ED Grado I' 
-  | 'No Evaluado';
+  | 'No Evaluado'
+  | string;
 
 export interface Ejemplar {
   id: string;
@@ -563,6 +578,7 @@ export type TipoTareaDiaria =
   | 'POST_VENTA'
   | 'ALIMENTACION'
   | 'POA_TRAMITE'
+  | 'CONTROL'
   | 'HIGIENE'
   | 'OTRO';
 

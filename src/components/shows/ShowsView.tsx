@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { ExposicionPOA } from '../../types';
+import { determinarCategoriaExpoPOA } from '../../utils/poaRegulations';
 import {
   Trophy,
   Plus,
@@ -38,6 +39,24 @@ export const ShowsView: React.FC = () => {
   const [observaciones, setObservaciones] = useState('');
 
   const selectedDog = ejemplares.find((e) => e.id === ejemplarId);
+
+  // Auto-cálculo oficial POA de Categoría y Clase según fecha de nacimiento y fecha de expo
+  const categoriaAutoInfo = useMemo(() => {
+    if (!selectedDog) return null;
+    return determinarCategoriaExpoPOA(
+      selectedDog.fechaNacimiento,
+      fecha,
+      selectedDog.calificacionCria,
+      selectedDog.sexo
+    );
+  }, [selectedDog, fecha]);
+
+  useEffect(() => {
+    if (categoriaAutoInfo) {
+      setCategoria(categoriaAutoInfo.nombreCategoria);
+      setClase(categoriaAutoInfo.claseSugerida);
+    }
+  }, [categoriaAutoInfo]);
 
   const filteredShows = exposiciones.filter((s) => {
     const q = searchTerm.toLowerCase();
@@ -306,6 +325,50 @@ export const ShowsView: React.FC = () => {
                     onChange={(e) => setLugar(e.target.value)}
                     placeholder="Escobar, Buenos Aires"
                     className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-slate-900 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+
+              {/* Categoría Automática Oficial POA */}
+              {categoriaAutoInfo && (
+                <div className="p-3 rounded-xl bg-amber-50/80 border border-amber-200/80 text-amber-900 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-amber-800 flex items-center gap-1">
+                      <Trophy className="w-3.5 h-3.5 text-amber-600" />
+                      Categoría Asignada por POA (Cálculo Oficial)
+                    </span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200/80 text-amber-900">
+                      {categoriaAutoInfo.edadMeses.toFixed(1)} meses
+                    </span>
+                  </div>
+                  <div className="text-xs font-bold text-slate-900">
+                    {categoriaAutoInfo.nombreCategoria} • {categoriaAutoInfo.claseSugerida}
+                  </div>
+                  <p className="text-[11px] text-amber-800/90 leading-tight">
+                    {categoriaAutoInfo.descripcionReglamentaria}
+                  </p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Categoría POA</label>
+                  <input
+                    type="text"
+                    value={categoria}
+                    onChange={(e) => setCategoria(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-slate-900 font-medium focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Clase</label>
+                  <input
+                    type="text"
+                    value={clase}
+                    onChange={(e) => setClase(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-slate-900 font-medium focus:outline-none focus:border-amber-500"
                   />
                 </div>
               </div>

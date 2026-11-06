@@ -53,6 +53,7 @@ export const PricingSimulator: React.FC = () => {
   const [incluyeTatuajeChip, setIncluyeTatuajeChip] = useState(false);
   const [plazoInscripcion, setPlazoInscripcion] = useState<'HASTA_70' | 'HASTA_90' | 'MAS_90'>('HASTA_70');
   const [margenDeseadoPct, setMargenDeseadoPct] = useState<number>(45);
+  const [precioRealInput, setPrecioRealInput] = useState<number | ''>(650000);
 
   // Gastos Operativos de la Camada
   const [gastos, setGastos] = useState<GastosOperativosCamada>({
@@ -156,6 +157,13 @@ export const PricingSimulator: React.FC = () => {
   const precioSugeridoCachorro = Math.round(costoBasePorCachorro * (1 + margenDeseadoPct / 100));
   const ingresoTotalProyectado = precioSugeridoCachorro * numCachorros;
   const gananciaNetaProyectada = ingresoTotalProyectado - costoTotalCamada;
+
+  // Cálculos dinámicos con el Precio de Venta Real ingresado por el criador
+  const precioVentaReal = typeof precioRealInput === 'number' && precioRealInput > 0 ? precioRealInput : precioSugeridoCachorro;
+  const ingresoTotalReal = precioVentaReal * numCachorros;
+  const gananciaNetaReal = ingresoTotalReal - costoTotalCamada;
+  const margenRealPct = ingresoTotalReal > 0 ? Math.round(((gananciaNetaReal / ingresoTotalReal) * 100) * 10) / 10 : 0;
+  const gananciaPorCachorroReal = numCachorros > 0 ? Math.round(gananciaNetaReal / numCachorros) : 0;
 
   const formatMoneda = (val: number) => {
     return `$ ${val.toLocaleString('es-AR')}`;
@@ -748,25 +756,25 @@ export const PricingSimulator: React.FC = () => {
               </span>
             </div>
 
-            {/* Price Per Puppy Main Display */}
-            <div>
+            {/* Precio Sugerido de Venta */}
+            <div className="p-4 rounded-xl bg-slate-950/40 border border-indigo-900/40 space-y-2">
               <span className="text-xs text-indigo-200 block">
                 Precio Sugerido de Venta (por cachorro):
               </span>
-              <div className="text-3xl sm:text-4xl font-black tracking-tight text-white mt-1">
+              <div className="text-3xl sm:text-4xl font-black tracking-tight text-white">
                 {formatMoneda(precioSugeridoCachorro)}
               </div>
-              <div className="flex items-center gap-2 mt-2 text-xs text-indigo-300">
-                <span>Costo base de producción: {formatMoneda(costoBasePorCachorro)}</span>
+              <div className="flex items-center gap-2 text-xs text-indigo-300">
+                <span>Costo base unitario: {formatMoneda(costoBasePorCachorro)}</span>
                 <span>•</span>
                 <span className="text-emerald-400 font-bold">+{margenDeseadoPct}% Margen</span>
               </div>
             </div>
 
-            {/* Slider de Margen de Ganancia */}
+            {/* Slider de Margen de Ganancia Deseado */}
             <div className="p-3.5 rounded-xl bg-slate-950/60 border border-indigo-900/60 space-y-2">
               <div className="flex items-center justify-between text-xs font-bold">
-                <span className="text-slate-300">Margen de Ganancia Deseado:</span>
+                <span className="text-slate-300">Margen Deseado para Sugerencia:</span>
                 <span className="text-amber-400 font-mono text-sm">{margenDeseadoPct}%</span>
               </div>
               <input
@@ -785,6 +793,76 @@ export const PricingSimulator: React.FC = () => {
               </div>
             </div>
 
+            {/* NUEVO CAMPO: Precio de Venta Real / Deseado por Cachorro */}
+            <div className="p-4 rounded-xl bg-gradient-to-br from-indigo-950/80 to-slate-950 border border-indigo-500/50 space-y-3 shadow-lg">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-black uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                  <CircleDollarSign className="w-4 h-4 text-amber-400" />
+                  <span>Precio de Venta Real / Deseado por Cachorro:</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setPrecioRealInput(precioSugeridoCachorro)}
+                  className="text-[10px] text-indigo-300 hover:text-white underline cursor-pointer"
+                >
+                  Usar sugerido
+                </button>
+              </div>
+
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400">$</span>
+                <input
+                  type="number"
+                  value={precioRealInput}
+                  onChange={(e) => setPrecioRealInput(e.target.value === '' ? '' : Number(e.target.value))}
+                  placeholder={precioSugeridoCachorro.toString()}
+                  className="w-full pl-8 pr-4 py-2.5 rounded-xl bg-slate-900 border border-indigo-400/60 text-white font-mono text-lg font-black focus:outline-none focus:ring-2 focus:ring-amber-400 shadow-inner"
+                />
+              </div>
+
+              {/* Métricas Dinámicas al Precio Real */}
+              <div className="pt-2 border-t border-indigo-900/60 space-y-2">
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="p-2.5 rounded-lg bg-slate-900/80 border border-indigo-900/50">
+                    <span className="text-[10px] text-slate-400 block">Ingreso Total Real:</span>
+                    <span className="text-sm font-black text-white font-mono">{formatMoneda(ingresoTotalReal)}</span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-slate-900/80 border border-indigo-900/50">
+                    <span className="text-[10px] text-slate-400 block">Margen Real Obtenido:</span>
+                    <span className={`text-sm font-black font-mono ${margenRealPct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {margenRealPct}%
+                    </span>
+                  </div>
+                </div>
+
+                {/* Ganancia Neta Total a ese Precio */}
+                <div className={`p-3 rounded-xl border flex items-center justify-between text-xs ${
+                  gananciaNetaReal >= 0
+                    ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-200'
+                    : 'bg-rose-950/40 border-rose-500/40 text-rose-200'
+                }`}>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider block opacity-80">
+                      Ganancia Neta Total de la Camada:
+                    </span>
+                    <span className="text-lg font-black font-mono">
+                      {formatMoneda(gananciaNetaReal)}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] opacity-80 block">Limpio por cachorro:</span>
+                    <span className="font-mono font-bold">{formatMoneda(gananciaPorCachorroReal)}</span>
+                  </div>
+                </div>
+
+                {gananciaNetaReal < 0 && (
+                  <p className="text-[11px] text-rose-300 bg-rose-950/60 p-2 rounded-lg border border-rose-800">
+                    ⚠️ Alerta: El precio ingresado no cubre el costo de producción ({formatMoneda(costoBasePorCachorro)}/cachorro). La camada arroja pérdidas.
+                  </p>
+                )}
+              </div>
+            </div>
+
             {/* Financial Totals Breakdown */}
             <div className="space-y-2 text-xs divide-y divide-indigo-900/40">
               <div className="flex justify-between pt-2 text-indigo-200">
@@ -798,14 +876,6 @@ export const PricingSimulator: React.FC = () => {
               <div className="flex justify-between pt-2 text-indigo-100 font-bold">
                 <span>Costo Total Invertido en la Camada:</span>
                 <span className="font-mono text-amber-300">{formatMoneda(costoTotalCamada)}</span>
-              </div>
-              <div className="flex justify-between pt-2 text-indigo-100 font-bold">
-                <span>Ingreso Total por Venta (100% camadas):</span>
-                <span className="font-mono text-white">{formatMoneda(ingresoTotalProyectado)}</span>
-              </div>
-              <div className="flex justify-between pt-2.5 text-sm font-black text-emerald-400">
-                <span>Ganancia Neta Final Proyectada:</span>
-                <span className="font-mono">{formatMoneda(gananciaNetaProyectada)}</span>
               </div>
             </div>
           </div>

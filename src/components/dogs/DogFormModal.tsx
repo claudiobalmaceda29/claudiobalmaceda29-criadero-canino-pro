@@ -9,6 +9,11 @@ import * as pdfjsLib from 'pdfjs-dist';
 import Tesseract from 'tesseract.js';
 import { DocumentPreviewModal } from '../common/DocumentPreviewModal';
 import { persistPedigreeDocument, resolveDocumentUrl } from '../../lib/documentStorage';
+import {
+  OPCIONES_CADERA_POA,
+  OPCIONES_CODO_POA,
+  OPCIONES_CALIFICACION_CRIA_POA,
+} from '../../utils/poaRegulations';
 
 // Configure pdfjs-dist worker for browser execution
 if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
@@ -1459,32 +1464,35 @@ export const DogFormModal: React.FC<DogFormModalProps> = ({ dog, onClose, isClon
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
-                    Displasia de Cadera (HD)
+                    Displasia de Cadera (HD) Oficial POA/SV *
                   </label>
                   <select
                     value={displasiaCadera}
                     onChange={(e) => setDisplasiaCadera(e.target.value as any)}
-                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-xs"
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-xs"
                   >
-                    <option value='HD "a" Normal (Libre)'>HD &quot;a&quot; Normal (Libre Oficial)</option>
-                    <option value='HD "a" Casi Normal (Permitido)'>HD &quot;a&quot; Casi Normal (Permitido)</option>
-                    <option value="HD Permitido (Grado I)">HD Permitido (Grado I)</option>
-                    <option value="No Evaluado">No Evaluado</option>
+                    <option value="a1">a1 - HD &quot;a&quot; Normal (Libre Oficial POA/SV)</option>
+                    <option value="a2">a2 - HD &quot;a&quot; Casi Normal (Permitido)</option>
+                    <option value="a3">a3 - HD &quot;a&quot; Todavía Permitido (Grado I)</option>
+                    <option value="Mediana">Mediana - Displasia Coxofemoral (No Apto)</option>
+                    <option value="Grave">Grave - Displasia Severa (No Apto)</option>
+                    <option value="No Evaluado">No Evaluado / Sin Placa Oficial</option>
                   </select>
                 </div>
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
-                    Displasia de Codo (ED)
+                    Displasia de Codo (ED) Oficial POA/SV *
                   </label>
                   <select
                     value={displasiaCodo}
                     onChange={(e) => setDisplasiaCodo(e.target.value as any)}
-                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-xs"
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-xs"
                   >
-                    <option value='ED "0" Normal (Libre)'>ED &quot;0&quot; Normal (Libre Oficial)</option>
-                    <option value='ED "1" Casi Normal'>ED &quot;1&quot; Casi Normal</option>
-                    <option value="ED Grado I">ED Grado I</option>
-                    <option value="No Evaluado">No Evaluado</option>
+                    <option value="Normal">Normal - ED &quot;0&quot; (Libre Oficial POA/SV)</option>
+                    <option value="Casi Normal">Casi Normal - ED &quot;1&quot; (Permitido)</option>
+                    <option value="Todavía Permitido">Todavía Permitido - ED &quot;2&quot; (Permitido)</option>
+                    <option value="Severa">Severa - Displasia de Codo (No Apto)</option>
+                    <option value="No Evaluado">No Evaluado / Sin Placa Oficial</option>
                   </select>
                 </div>
               </div>
@@ -1492,15 +1500,19 @@ export const DogFormModal: React.FC<DogFormModalProps> = ({ dog, onClose, isClon
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
-                    Calificación de Cría POA
+                    Calificación de Cría / Körung POA *
                   </label>
-                  <input
-                    type="text"
+                  <select
                     value={calificacionCria}
                     onChange={(e) => setCalificacionCria(e.target.value)}
-                    placeholder="Seleccionado de Primera (Kkl 1)"
-                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-xs"
-                  />
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-xs"
+                  >
+                    {OPCIONES_CALIFICACION_CRIA_POA.map((op) => (
+                      <option key={op} value={op}>
+                        {op}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">ADN</label>

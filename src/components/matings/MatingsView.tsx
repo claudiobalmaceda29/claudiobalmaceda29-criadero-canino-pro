@@ -15,8 +15,11 @@ import {
   Activity,
   ArrowRight,
   Edit,
+  Ban,
+  ShieldCheck,
 } from 'lucide-react';
 import { formatDateDMY } from '../../lib/dogUtils';
+import { evaluarEdadReglamentariaPOA } from '../../utils/poaRegulations';
 
 export const MatingsView: React.FC = () => {
   const {
@@ -122,6 +125,21 @@ export const MatingsView: React.FC = () => {
     if (!selectedHembra) {
       alert('Por favor seleccioná una hembra reproductora.');
       return;
+    }
+
+    // Validación oficial Club POA: Límites de edad para reproducción
+    const evalHembra = evaluarEdadReglamentariaPOA(selectedHembra, fechaMonta);
+    if (!evalHembra.valida) {
+      alert(`Fuera de edad reglamentaria. Esta camada no será reconocida por POA.\n\nHembra: ${selectedHembra.nombreCompleto} (${evalHembra.edadTexto}). ${evalHembra.motivoBloqueo}`);
+      return;
+    }
+
+    if (!isMachoExterno && selectedMacho) {
+      const evalMacho = evaluarEdadReglamentariaPOA(selectedMacho, fechaMonta);
+      if (!evalMacho.valida) {
+        alert(`Fuera de edad reglamentaria. Esta camada no será reconocida por POA.\n\nMacho: ${selectedMacho.nombreCompleto} (${evalMacho.edadTexto}). ${evalMacho.motivoBloqueo}`);
+        return;
+      }
     }
 
     setIsSaving(true);
@@ -531,9 +549,23 @@ export const MatingsView: React.FC = () => {
             <form onSubmit={handleSaveMonta} className="p-5 space-y-3.5 text-xs overflow-y-auto flex-1">
               {/* Hembra Selector */}
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Hembra (Madre) *
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-semibold text-slate-700">
+                    Hembra (Madre) *
+                  </label>
+                  {selectedHembra && (() => {
+                    const evalH = evaluarEdadReglamentariaPOA(selectedHembra, fechaMonta);
+                    return (
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        evalH.valida
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-rose-100 text-rose-800 font-black'
+                      }`}>
+                        Edad: {evalH.edadTexto} {evalH.valida ? '✓ Reglamentaria' : '❌ Fuera de edad (POA)'}
+                      </span>
+                    );
+                  })()}
+                </div>
                 <select
                   value={hembraId}
                   onChange={(e) => setHembraId(e.target.value)}
@@ -550,10 +582,24 @@ export const MatingsView: React.FC = () => {
               {/* Macho (Padrillo) Selection / External Form */}
               <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
-                  <label className="block font-bold text-slate-800 text-xs flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-blue-600"></span>
-                    <span>Macho (Padrillo) *</span>
-                  </label>
+                  <div className="flex items-center gap-2">
+                    <label className="block font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+                      <span>Macho (Padrillo) *</span>
+                    </label>
+                    {!isMachoExterno && selectedMacho && (() => {
+                      const evalM = evaluarEdadReglamentariaPOA(selectedMacho, fechaMonta);
+                      return (
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          evalM.valida
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-rose-100 text-rose-800 font-black'
+                        }`}>
+                          {evalM.edadTexto} {evalM.valida ? '✓' : '❌ Fuera de edad (<24m)'}
+                        </span>
+                      );
+                    })()}
+                  </div>
                   <button
                     type="button"
                     onClick={() => setIsMachoExterno(!isMachoExterno)}

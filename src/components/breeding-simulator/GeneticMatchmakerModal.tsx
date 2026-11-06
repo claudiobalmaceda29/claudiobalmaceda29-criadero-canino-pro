@@ -1,6 +1,16 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
-import { Ejemplar, SugerenciaMatchCruce, CompensacionMorfologicaItem } from '../../types';
+import { Ejemplar, CompensacionMorfologicaItem } from '../../types';
+import {
+  evaluarEdadReglamentariaPOA,
+  evaluarConsanguinidadSV,
+  evaluarCriaDeSeleccionPremium,
+  evaluarCompatibilidadSaludArticular,
+  EvaluacionConsanguinidadSVResult,
+  EvaluacionCriaSeleccionResult,
+  EvaluacionSaludArticularResult,
+  EvaluacionEdadPOAResult,
+} from '../../utils/poaRegulations';
 import {
   Sparkles,
   HeartHandshake,
@@ -15,7 +25,26 @@ import {
   Award,
   ChevronRight,
   Filter,
+  HelpCircle,
+  Ban,
+  ShieldAlert,
+  Star,
 } from 'lucide-react';
+
+interface MatchmakerItem {
+  macho: Ejemplar;
+  hembra: Ejemplar;
+  puntajeCompatibilidadPct: number;
+  evalSV: EvaluacionConsanguinidadSVResult;
+  evalPremium: EvaluacionCriaSeleccionResult;
+  evalArticular: EvaluacionSaludArticularResult;
+  evalEdadMacho: EvaluacionEdadPOAResult;
+  compensacionesMorfologicas: CompensacionMorfologicaItem[];
+  pros: string[];
+  alertas: string[];
+  estaBloqueado: boolean;
+  motivoBloqueo?: string;
+}
 
 interface GeneticMatchmakerModalProps {
   isOpen: boolean;
@@ -29,6 +58,8 @@ export const GeneticMatchmakerModal: React.FC<GeneticMatchmakerModalProps> = ({
   onSelectPair,
 }) => {
   const { ejemplares, setActiveTab } = useApp();
+  const [selectedHembraId, setSelectedHembraId] = useState<string>('');
+  const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
 
   // Filtrar machos y hembras activos del criadero o disponibles para cría
   const machos = useMemo(() => {
@@ -43,67 +74,38 @@ export const GeneticMatchmakerModal: React.FC<GeneticMatchmakerModalProps> = ({
     );
   }, [ejemplares]);
 
-  const [selectedHembraId, setSelectedHembraId] = useState<string>(hembras[0]?.id || '');
-  const [minScoreFilter, setMinScoreFilter] = useState<number>(75);
-
+  // Hembra seleccionada
   const selectedHembra = useMemo(() => {
+    if (!selectedHembraId && hembras.length > 0) return hembras[0];
     return hembras.find((h) => h.id === selectedHembraId) || hembras[0];
   }, [hembras, selectedHembraId]);
 
-  // Algoritmo de emparejamiento genético y morfológico
-  const sugerencias = useMemo<SugerenciaMatchCruce[]>(() => {
+  // Evaluación de edad reglamentaria de la hembra
+  const evalEdadHembra = useMemo(() => {
+    if (!selectedHembra) return null;
+    return evaluarEdadReglamentariaPOA(selectedHembra);
+  }, [selectedHembra]);
+
+  // Algoritmo de emparejamiento genético y morfológico con lógica dura POA
+  const sugerencias = useMemo<MatchmakerItem[]>(() => {
     if (!selectedHembra || machos.length === 0) return [];
 
-    const matches: SugerenciaMatchCruce[] = [];
+    const matches: MatchmakerItem[] = [];
 
     machos.forEach((macho) => {
-      // 1. Cálculo de COI (Consanguinidad estimada mediante análisis de ancestros inmediatos)
-      let commonAncestorsCount = 0;
-      const hembraAncestors = [
-        selectedHembra.padreNombre,
-        selectedHembra.madreNombre,
-        selectedHembra.abueloPaterno,
-        selectedHembra.abuelaPaterna,
-        selectedHembra.abueloMaterno,
-        selectedHembra.abuelaMaterna,
-      ].filter(Boolean);
+      // 1. Evaluación de Consanguinidad SV y Semáforos Oficiales
+      const evalSV = evaluarConsanguinidadSV(macho, selectedHembra);
 
-      const machoAncestors = [
-        macho.padreNombre,
-        macho.madreNombre,
-        macho.abueloPaterno,
-        macho.abuelaPaterna,
-        macho.abueloMaterno,
-        macho.abuelaMaterna,
-      ].filter(Boolean);
+      // 2. Evaluación de Salud Articular (HD/ED)
+      const evalArticular = evaluarCompatibilidadSaludArticular(macho, selectedHembra);
 
-      hembraAncestors.forEach((anc) => {
-        if (anc && machoAncestors.some((mAnc) => mAnc?.toLowerCase() === anc.toLowerCase())) {
-          commonAncestorsCount++;
-        }
-      });
+      // 3. Evaluación de Edad Reglamentaria del Macho
+      const evalEdadMacho = evaluarEdadReglamentariaPOA(macho);
 
-      // Cálculo de COI aproximado: si no hay ancestros compartidos en 3 gens = 1.2% - 2.5%, si hay 1 = 3.5%, si hay más = 6-12%
-      let coiEstimado = 1.8;
-      if (commonAncestorsCount === 1) coiEstimado = 3.9;
-      else if (commonAncestorsCount === 2) coiEstimado = 6.5;
-      else if (commonAncestorsCount >= 3) coiEstimado = 10.4;
+      // 4. Evaluación de Cría de Selección (Premium)
+      const evalPremium = evaluarCriaDeSeleccionPremium(macho, selectedHembra);
 
-      // 2. Compatibilidad de Displasia de Cadera / Codo según reglamento POA
-      let dispCompatible = true;
-      let dispDetalle = 'Excelente: Ambos reproductores con diagnósticos oficiales libres.';
-
-      const hDisp = (selectedHembra.displasiaCadera || '').toLowerCase();
-      const mDisp = (macho.displasiaCadera || '').toLowerCase();
-
-      if (hDisp.includes('severa') || mDisp.includes('severa')) {
-        dispCompatible = false;
-        dispDetalle = 'Incompatible: Uno de los ejemplares presenta displasia severa.';
-      } else if (hDisp.includes('permitido') || mDisp.includes('permitido')) {
-        dispDetalle = 'Permitido con precaución: Requiere que la contraparte sea HD Libre ("a" Normal).';
-      }
-
-      // 3. Compensaciones Morfológicas Clave
+      // 5. Compensaciones Morfológicas
       const compensaciones: CompensacionMorfologicaItem[] = [];
       const pros: string[] = [];
       const alertas: string[] = [];
@@ -114,7 +116,7 @@ export const GeneticMatchmakerModal: React.FC<GeneticMatchmakerModalProps> = ({
           caracteristica: 'Grupa & Inclinación',
           observacionHembra: 'Grupa con tendencia a corta o caída',
           virtudMacho: 'Macho con grupa de excelente longitud y correcta angulación (23º)',
-          efectoEsperado: 'Corrección de la grupa en la descendencia, optimizando el empuje posterior en el trote.',
+          efectoEsperado: 'Corrección de la longitud de grupa en la progenie para optimizar el empuje posterior en el trote.',
         });
         pros.push('Compensación efectiva de longitud e inclinación de grupa.');
       } else {
@@ -146,46 +148,74 @@ export const GeneticMatchmakerModal: React.FC<GeneticMatchmakerModalProps> = ({
       const hAltura = selectedHembra.alturaCruzCm || 58;
       const mAltura = macho.alturaCruzCm || 64;
       if (hAltura >= 60 && mAltura >= 65) {
-        alertas.push('Precaución de tamaño: Ambos ejemplares están en el límite superior del estándar (Riesgo de cachorros gigantes).');
+        alertas.push('Precaución de tamaño: Ambos ejemplares en límite superior del estándar.');
       } else if (hAltura >= 59 && mAltura <= 63.5) {
-        pros.push('Equilibrio de alzada: Macho mediano compensa la altura en límite de la hembra.');
+        pros.push('Equilibrio de alzada: Macho mediano compensa la altura de la hembra.');
       }
 
-      // Puntaje final de compatibilidad
-      let score = 92;
-      if (coiEstimado <= 3.5) score += 5;
-      else if (coiEstimado > 8) score -= 18;
+      // Chequeo de Bloqueo General
+      let estaBloqueado = false;
+      let motivoBloqueo: string | undefined = undefined;
 
-      if (!dispCompatible) score -= 35;
+      if (evalSV.bloqueado) {
+        estaBloqueado = true;
+        motivoBloqueo = evalSV.mensajeAlerta;
+      } else if (evalArticular.bloqueadoPorDisplasia) {
+        estaBloqueado = true;
+        motivoBloqueo = evalArticular.mensaje;
+      } else if (!evalEdadMacho.valida) {
+        estaBloqueado = true;
+        motivoBloqueo = evalEdadMacho.alertaTexto;
+      } else if (evalEdadHembra && !evalEdadHembra.valida) {
+        estaBloqueado = true;
+        motivoBloqueo = evalEdadHembra.alertaTexto;
+      }
+
+      // Puntaje final de afinidad genética
+      let score = 90;
+      if (evalPremium.esPremium) score += 8; // Bonificación Cría de Selección Premium
+      if (evalSV.semaforo === 'VERDE') score += 4;
+      if (evalSV.semaforo === 'AMARILLO') score -= 10;
+      if (evalSV.semaforo === 'ROJO') score = 20;
+
+      if (evalArticular.alertaAmarillaPrecaucion) score -= 8;
+      if (evalArticular.bloqueadoPorDisplasia) score = 15;
+      if (!evalEdadMacho.valida) score = 10;
+
       if (compensaciones.length > 0) score += 3;
-      if (alertas.length > 0) score -= 8;
 
-      const finalScore = Math.min(99, Math.max(40, score));
+      const finalScore = Math.min(99, Math.max(10, score));
 
       matches.push({
         macho,
         hembra: selectedHembra,
         puntajeCompatibilidadPct: finalScore,
-        coiEstimado,
-        coiNivel: coiEstimado <= 4 ? 'OPTIMO' : coiEstimado <= 7.5 ? 'ACEPTABLE' : 'ELEVADO_PRECAUCION',
-        compatibilidadDisplasia: {
-          compatible: dispCompatible,
-          detalle: dispDetalle,
-        },
+        evalSV,
+        evalPremium,
+        evalArticular,
+        evalEdadMacho,
         compensacionesMorfologicas: compensaciones,
-        recomendacionGeneral:
-          finalScore >= 90
-            ? 'Cruce Altamente Recomendado: Excelente balance entre bajo inbreeding y complementación anatómica.'
-            : finalScore >= 75
-            ? 'Cruce Favorable: Buena combinación genética con precauciones morfológicas a vigilar en la cría.'
-            : 'Cruce no prioritario: Se sugiere explorar otros padrillos para reducir consanguinidad o mejorar estructura.',
         pros,
         alertas,
+        estaBloqueado,
+        motivoBloqueo,
       });
     });
 
-    return matches.sort((a, b) => b.puntajeCompatibilidadPct - a.puntajeCompatibilidadPct);
-  }, [selectedHembra, machos]);
+    // Ordenar priorizando:
+    // 1) NO bloqueados arriba
+    // 2) Cría de Selección Premium
+    // 3) Mayor puntaje de compatibilidad
+    return matches.sort((a, b) => {
+      if (a.estaBloqueado !== b.estaBloqueado) {
+        return a.estaBloqueado ? 1 : -1;
+      }
+      if (a.evalPremium.esPremium !== b.evalPremium.esPremium) {
+        return a.evalPremium.esPremium ? -1 : 1;
+      }
+      return b.puntajeCompatibilidadPct - a.puntajeCompatibilidadPct;
+    });
+  }, [selectedHembra, machos, evalEdadHembra]);
 
   if (!isOpen) return null;
 
@@ -199,25 +229,57 @@ export const GeneticMatchmakerModal: React.FC<GeneticMatchmakerModalProps> = ({
               <Dna className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-                <span>Matchmaker de Inteligencia Genética & Morfología</span>
-                <Sparkles className="w-4 h-4 text-amber-500" />
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  <span>Matchmaker Genético Inteligente</span>
+                  <Sparkles className="w-4 h-4 text-amber-500" />
+                </h3>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border border-purple-200">
+                  Reglamento POA / SV
+                </span>
+              </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Sugerencias óptimas de cruza evaluando COI (Inbreeding), displasia y compensaciones de estructura
+                Semáforos de consanguinidad, límites de edad, cría de selección y salud articular oficial.
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-slate-600">
+          <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-slate-600 cursor-pointer">
             <X className="w-5 h-5" />
           </button>
         </div>
 
+        {/* ALERTA DE EDAD DE LA HEMBRA (Si está fuera de rango) */}
+        {evalEdadHembra && !evalEdadHembra.valida && (
+          <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-900 text-rose-900 dark:text-rose-200 text-xs flex items-center gap-3 animate-pulse">
+            <Ban className="w-5 h-5 text-rose-600 shrink-0" />
+            <div>
+              <strong className="block text-sm font-black">
+                {evalEdadHembra.alertaTexto}
+              </strong>
+              <span>
+                {selectedHembra?.nombreCompleto} tiene {evalEdadHembra.edadTexto}. El reglamento oficial POA prohíbe el servicio de hembras menores a 20 meses o mayores a 8 años (96 meses).
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Selector de Hembra a Evaluar */}
         <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 space-y-2">
-          <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-            Seleccioná la Hembra Reproductora del Plantel:
-          </label>
+          <div className="flex items-center justify-between">
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+              Seleccioná la Hembra Reproductora del Plantel:
+            </label>
+            {evalEdadHembra && (
+              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                evalEdadHembra.valida
+                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                  : 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+              }`}>
+                Edad: {evalEdadHembra.edadTexto} {evalEdadHembra.valida ? '✓ Apta' : '✗ Bloqueada'}
+              </span>
+            )}
+          </div>
+
           <div className="flex flex-wrap gap-2">
             {hembras.length === 0 ? (
               <span className="text-xs text-slate-400">No hay hembras reproductoras activas registradas.</span>
@@ -247,28 +309,49 @@ export const GeneticMatchmakerModal: React.FC<GeneticMatchmakerModalProps> = ({
             <span>
               {sugerencias.length} Padrillo(s) Evaluado(s) para {selectedHembra?.nombreCompleto}:
             </span>
-            <span className="text-slate-400 text-[11px]">Ordenados por afinidad genética</span>
+            <div className="flex items-center gap-3">
+              <span className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400 font-bold">
+                <Star className="w-3.5 h-3.5 fill-current" />
+                <span>Cría de Selección Priorizada</span>
+              </span>
+            </div>
           </div>
 
-          <div className="space-y-3.5">
+          <div className="space-y-4">
             {sugerencias.map((sug) => {
-              const score = sug.puntajeCompatibilidadPct;
-              const scoreBadge =
-                score >= 90
-                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                  : score >= 75
-                  ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30'
-                  : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30';
+              const { evalSV, evalPremium, evalArticular, evalEdadMacho } = sug;
+              const isBlocked = sug.estaBloqueado;
+
+              // Semáforo de Consanguinidad SV styling
+              const semaforoBg =
+                evalSV.semaforo === 'ROJO'
+                  ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-900 text-rose-900 dark:text-rose-200'
+                  : evalSV.semaforo === 'AMARILLO'
+                  ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-900 text-amber-900 dark:text-amber-200'
+                  : 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-900 text-emerald-900 dark:text-emerald-200';
+
+              const semaforoBadge =
+                evalSV.semaforo === 'ROJO'
+                  ? 'bg-rose-600 text-white'
+                  : evalSV.semaforo === 'AMARILLO'
+                  ? 'bg-amber-500 text-white'
+                  : 'bg-emerald-600 text-white';
 
               return (
                 <div
                   key={sug.macho.id}
-                  className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-xs space-y-3.5 hover:border-purple-300 dark:hover:border-purple-800 transition-colors"
+                  className={`p-4 sm:p-5 rounded-2xl border shadow-xs space-y-3.5 transition-all ${
+                    isBlocked
+                      ? 'bg-slate-50/60 dark:bg-slate-900/60 border-slate-300 dark:border-slate-800 opacity-90'
+                      : evalPremium.esPremium
+                      ? 'bg-gradient-to-br from-amber-50/30 via-white to-purple-50/30 dark:from-amber-950/20 dark:via-slate-900 dark:to-purple-950/20 border-amber-300 dark:border-amber-800 shadow-md ring-1 ring-amber-400/30'
+                      : 'bg-white dark:bg-slate-900 border-slate-200/90 dark:border-slate-800'
+                  }`}
                 >
                   {/* Top Bar of the Match */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
                     <div className="flex items-center gap-3">
-                      <div className="w-11 h-11 rounded-xl bg-slate-100 dark:bg-slate-800 overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700">
+                      <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700 relative">
                         <img
                           src={sug.macho.fotoUrl || '/hero-pastor-aleman.png'}
                           alt={sug.macho.nombreCompleto}
@@ -276,64 +359,123 @@ export const GeneticMatchmakerModal: React.FC<GeneticMatchmakerModalProps> = ({
                         />
                       </div>
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <h4 className="text-sm font-black text-slate-900 dark:text-white">
                             {sug.macho.nombreCompleto}
                           </h4>
                           <span className="text-[10px] font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded text-slate-600 dark:text-slate-400">
-                            {sug.macho.numeroPOA}
+                            {sug.macho.numeroPOA || 'POA-S/N'}
                           </span>
+
+                          {/* Badge de Cría de Selección (Premium) */}
+                          {evalPremium.esPremium && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500 to-yellow-500 text-white shadow-xs">
+                              <Star className="w-3 h-3 fill-current" />
+                              <span>Cría de Selección (Premium)</span>
+                            </span>
+                          )}
+
+                          {/* Badge de Fuera de Edad Macho */}
+                          {!evalEdadMacho.valida && (
+                            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-600 text-white">
+                              Macho menor a 24 meses ({evalEdadMacho.edadTexto})
+                            </span>
+                          )}
                         </div>
+
                         <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                          Títulos: {sug.macho.titulos?.join(', ') || 'Seleccionado 1ª'} • HD: {sug.macho.displasiaCadera}
+                          HD: <strong className="text-slate-700 dark:text-slate-200">{sug.macho.displasiaCadera}</strong> • ED: <strong className="text-slate-700 dark:text-slate-200">{sug.macho.displasiaCodo}</strong> • Selección: {sug.macho.calificacionCria || 'Sin Körung'}
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2.5 self-end sm:self-center">
+                    <div className="flex items-center gap-3 self-end sm:self-center">
                       <div className="text-right">
                         <span className="text-[10px] text-slate-400 font-bold uppercase block">
-                          Compatibilidad
+                          Afinidad Genética
                         </span>
-                        <span className={`text-base font-black px-2.5 py-0.5 rounded-full border ${scoreBadge}`}>
-                          {score}%
+                        <span className={`text-base font-black px-2.5 py-0.5 rounded-full border ${
+                          isBlocked
+                            ? 'bg-rose-100 text-rose-800 border-rose-300'
+                            : sug.puntajeCompatibilidadPct >= 90
+                            ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                            : 'bg-blue-100 text-blue-800 border-blue-300'
+                        }`}>
+                          {sug.puntajeCompatibilidadPct}%
                         </span>
                       </div>
                     </div>
                   </div>
 
-                  {/* COI & Displasia Indicators */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-bold text-slate-700 dark:text-slate-300">
-                          Consanguinidad (COI):
+                  {/* BANNER DE SEMÁFORO DE CONSANGUINIDAD SV */}
+                  <div className={`p-3 rounded-xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${semaforoBg}`}>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider ${semaforoBadge}`}>
+                          {evalSV.semaforo === 'ROJO' ? 'Bloqueo 1-2 / 2-2' : evalSV.semaforo === 'AMARILLO' ? 'Semáforo Amarillo' : 'Semáforo Verde'}
                         </span>
-                        <span className="font-mono font-extrabold text-purple-600 dark:text-purple-400">
-                          {sug.coiEstimado}% ({sug.coiNivel})
+                        <strong className="text-xs font-black">
+                          Notación SV: {evalSV.notacionSV}
+                        </strong>
+                        <span className="font-mono text-[11px]">
+                          (Wright COI: {evalSV.coiWrightPct}%)
                         </span>
+
+                        {/* Tooltip Educativo [?] */}
+                        <div className="relative inline-block">
+                          <button
+                            type="button"
+                            onClick={() => setActiveTooltip(activeTooltip === sug.macho.id ? null : sug.macho.id)}
+                            className="p-0.5 rounded-full hover:bg-black/10 text-slate-500 hover:text-slate-900 cursor-pointer"
+                            title="¿Qué significa Wright COI vs Fórmula SV?"
+                          >
+                            <HelpCircle className="w-3.5 h-3.5" />
+                          </button>
+
+                          {activeTooltip === sug.macho.id && (
+                            <div className="absolute left-0 top-6 z-40 w-80 p-3 rounded-xl bg-slate-950 text-white text-[11px] shadow-2xl border border-slate-700 space-y-2 animate-in fade-in">
+                              <div className="font-bold text-amber-300 flex items-center justify-between">
+                                <span>Normativa Consanguinidad POA / SV</span>
+                                <button type="button" onClick={() => setActiveTooltip(null)} className="text-xs">✕</button>
+                              </div>
+                              <p>{evalSV.explicacionTooltip}</p>
+                              <div className="pt-1 border-t border-slate-800 text-[10px] text-slate-400">
+                                <strong>Rojo:</strong> Cruces 1-2, 2-1, 2-2 (Prohibidos).<br />
+                                <strong>Amarillo:</strong> Cruces 3-2, 2-3, 3-3 (Linebreeding estricto).<br />
+                                <strong>Verde:</strong> 4-4, 5-4, 5-5 o 0% (Vigor Híbrido Ideal).
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        {sug.coiEstimado <= 4
-                          ? 'Excelente vigor híbrido con mínimo riesgo de homocigosis nociva.'
-                          : 'Nivel moderado de linebreeding con control genealógico recomendado.'}
+
+                      <p className="font-medium text-[11.5px]">
+                        {evalSV.mensajeAlerta}
                       </p>
                     </div>
 
-                    <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-bold text-slate-700 dark:text-slate-300">
-                          Salud & Displasia POA:
-                        </span>
-                        <span className="font-bold text-emerald-600 dark:text-emerald-400">
-                          Aprobado
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        {sug.compatibilidadDisplasia.detalle}
-                      </p>
+                    <div className="text-right shrink-0">
+                      <span className="text-[10px] uppercase font-bold block opacity-75">Reglamento POA</span>
+                      <span className="font-black text-xs">
+                        {evalSV.bloqueado ? '❌ No Reconocido' : '✓ Reglamentario'}
+                      </span>
                     </div>
                   </div>
+
+                  {/* ALERTA DE SALUD ARTICULAR (DISPLASIA) */}
+                  {evalArticular.bloqueadoPorDisplasia && (
+                    <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 text-rose-900 dark:text-rose-200 text-xs flex items-center gap-2">
+                      <Ban className="w-4 h-4 text-rose-600 shrink-0" />
+                      <span>{evalArticular.mensaje}</span>
+                    </div>
+                  )}
+
+                  {evalArticular.alertaAmarillaPrecaucion && (
+                    <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-300 text-amber-900 dark:text-amber-200 text-xs flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>{evalArticular.mensaje}</span>
+                    </div>
+                  )}
 
                   {/* Compensaciones Morfológicas Detectadas */}
                   {sug.compensacionesMorfologicas.length > 0 && (
@@ -367,25 +509,44 @@ export const GeneticMatchmakerModal: React.FC<GeneticMatchmakerModalProps> = ({
                     ))}
                   </div>
 
-                  {/* Action Button */}
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800 text-xs">
-                    <span className="text-slate-500 dark:text-slate-400 italic text-[11px]">
-                      {sug.recomendacionGeneral}
-                    </span>
+                  {/* Bottom Action Footer */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-xs">
+                    <div>
+                      {isBlocked ? (
+                        <span className="text-rose-600 dark:text-rose-400 font-bold flex items-center gap-1.5">
+                          <Ban className="w-4 h-4" />
+                          <span>{sug.motivoBloqueo || 'Cruce bloqueado por reglamento POA.'}</span>
+                        </span>
+                      ) : (
+                        <span className="text-slate-500 dark:text-slate-400 italic text-[11px]">
+                          {evalPremium.esPremium
+                            ? '⭐ Cruce prioritario de Selección: Aporta máxima pureza y pedigree calificado.'
+                            : 'Cruce válido para libro de cría POA.'}
+                        </span>
+                      )}
+                    </div>
+
                     <button
                       type="button"
+                      disabled={isBlocked}
                       onClick={() => {
                         if (onSelectPair) {
                           onSelectPair(sug.macho, selectedHembra);
                         } else {
-                          setActiveTab('simulador');
-                          onClose();
+                          setActiveTab('montas');
                         }
+                        onClose();
                       }}
-                      className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold flex items-center gap-1 transition-all cursor-pointer shadow-xs shrink-0"
+                      className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs shrink-0 cursor-pointer ${
+                        isBlocked
+                          ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed opacity-60'
+                          : evalPremium.esPremium
+                          ? 'bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-700 hover:to-yellow-700 text-white shadow-md'
+                          : 'bg-purple-600 hover:bg-purple-700 text-white'
+                      }`}
                     >
-                      <span>Simular Cruza Completa</span>
-                      <ChevronRight className="w-3.5 h-3.5" />
+                      <span>{isBlocked ? 'Cruce Bloqueado' : 'Seleccionar para Monta'}</span>
+                      <ArrowRight className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
