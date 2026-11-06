@@ -267,6 +267,68 @@ service cloud.firestore {
         allow delete: if isSuperAdmin();
       }
     }
+
+    // Pizarra de Tareas Diarias: Aislamiento estricto multi-tenant por criaderoId / propietarioId
+    match /tareasDiarias/{tareaId} {
+      allow get: if isOwnerOfDoc(resource.data);
+      allow list: if isSignedIn() && (
+        isSuperAdmin() ||
+        resource.data.criaderoId == request.auth.uid ||
+        (resource.data.propietarioId != null && resource.data.propietarioId == request.auth.uid) ||
+        canAccessCriadero(resource.data.criaderoId)
+      );
+      allow create: if isOwnerOfDoc(request.resource.data);
+      allow update: if isOwnerOfDoc(resource.data) && isOwnerOfDoc(request.resource.data);
+      allow delete: if isOwnerOfDoc(resource.data);
+    }
+
+    // Seguimiento Post-Venta y Fidelización
+    match /seguimientoPostVenta/{seguimientoId} {
+      allow get: if isOwnerOfDoc(resource.data);
+      allow list: if isSignedIn() && (
+        isSuperAdmin() ||
+        resource.data.criaderoId == request.auth.uid ||
+        (resource.data.propietarioId != null && resource.data.propietarioId == request.auth.uid) ||
+        canAccessCriadero(resource.data.criaderoId)
+      );
+      allow create: if isOwnerOfDoc(request.resource.data);
+      allow update: if isOwnerOfDoc(resource.data) && isOwnerOfDoc(request.resource.data);
+      allow delete: if isOwnerOfDoc(resource.data);
+    }
+
+    // Simulaciones de Precios y Costos de Camada
+    match /simulacionesPrecios/{simulacionId} {
+      allow get: if isOwnerOfDoc(resource.data);
+      allow list: if isSignedIn() && (
+        isSuperAdmin() ||
+        resource.data.criaderoId == request.auth.uid ||
+        (resource.data.propietarioId != null && resource.data.propietarioId == request.auth.uid) ||
+        canAccessCriadero(resource.data.criaderoId)
+      );
+      allow create: if isOwnerOfDoc(request.resource.data);
+      allow update: if isOwnerOfDoc(resource.data) && isOwnerOfDoc(request.resource.data);
+      allow delete: if isOwnerOfDoc(resource.data);
+    }
+
+    // Cola de Notificaciones Omnicanal
+    match /colaNotificaciones/{notifId} {
+      allow get: if isOwnerOfDoc(resource.data);
+      allow list: if isSignedIn() && (
+        isSuperAdmin() ||
+        resource.data.criaderoId == request.auth.uid ||
+        (resource.data.propietarioId != null && resource.data.propietarioId == request.auth.uid) ||
+        canAccessCriadero(resource.data.criaderoId)
+      );
+      allow create: if isOwnerOfDoc(request.resource.data);
+      allow update: if isOwnerOfDoc(resource.data) && isOwnerOfDoc(request.resource.data);
+      allow delete: if isOwnerOfDoc(resource.data);
+    }
+
+    // Aranceles Oficiales POA: Lectura pública autenticada, edición reservada a SuperAdmin
+    match /arancelesPOA/{arancelId} {
+      allow read: if isSignedIn();
+      allow write: if isSuperAdmin();
+    }
   }
 }
 

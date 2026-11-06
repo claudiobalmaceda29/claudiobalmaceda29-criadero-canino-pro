@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { SimulacionCruza } from '../../types';
 import { GeneticAiReportModal, GeneticReportData } from './GeneticAiReportModal';
+import { GeneticMatchmakerModal } from './GeneticMatchmakerModal';
 
 export const BreedingSimulatorView: React.FC = () => {
   const {
@@ -58,6 +59,7 @@ export const BreedingSimulatorView: React.FC = () => {
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [serverCOI, setServerCOI] = useState<any>(null);
   const [isCalculatingServer, setIsCalculatingServer] = useState(false);
+  const [isMatchmakerOpen, setIsMatchmakerOpen] = useState(false);
 
   // AI Genetic Analysis States
   const [isGeneratingAiReport, setIsGeneratingAiReport] = useState(false);
@@ -430,9 +432,19 @@ export const BreedingSimulatorView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200/80 dark:border-indigo-900 text-indigo-700 dark:text-indigo-300 text-xs font-mono font-bold">
-          <Server className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-          <span>Wright Path Analysis API</span>
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setIsMatchmakerOpen(true)}
+            className="px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs flex items-center gap-2 shadow-sm transition-all hover:scale-[1.02] cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4 text-amber-300" />
+            <span>Matchmaker Genético Inteligente</span>
+          </button>
+          <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200/80 dark:border-indigo-900 text-indigo-700 dark:text-indigo-300 text-xs font-mono font-bold">
+            <Server className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+            <span>Wright Path Analysis API</span>
+          </div>
         </div>
       </div>
 
@@ -1171,6 +1183,12 @@ export const BreedingSimulatorView: React.FC = () => {
           onClose={() => setAiReportData(null)}
         />
       )}
+
+      {/* Genetic Matchmaker Intelligence Modal */}
+      <GeneticMatchmakerModal
+        isOpen={isMatchmakerOpen}
+        onClose={() => setIsMatchmakerOpen(false)}
+      />
     </div>
   );
 };

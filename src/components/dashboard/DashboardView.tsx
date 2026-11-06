@@ -316,7 +316,24 @@ export const DashboardView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setActiveTab('pizarra_diaria')}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs transition-all cursor-pointer"
+          >
+            <FolderKanban className="w-3.5 h-3.5" />
+            <span>Pizarra Diaria</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('cotizador_poa')}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-xs transition-all cursor-pointer"
+          >
+            <CircleDollarSign className="w-3.5 h-3.5" />
+            <span>Cotizador POA</span>
+          </button>
+
           {/* Calendar Date indicator */}
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-medium text-slate-600 dark:text-slate-300 shadow-xs">
             <Calendar className="w-3.5 h-3.5 text-blue-600" />

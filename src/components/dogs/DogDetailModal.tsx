@@ -38,6 +38,8 @@ import { DogFormModal } from './DogFormModal';
 import { calculateDogAge, formatDateDMY } from '../../lib/dogUtils';
 import { persistPedigreeDocument } from '../../lib/documentStorage';
 import { VisualPedigreeTree } from '../pedigree/VisualPedigreeTree';
+import { DogExposSubmodule } from './DogExposSubmodule';
+import { HeatPredictorCard } from '../cycles/HeatPredictorCard';
 
 interface DogDetailModalProps {
   dog: Ejemplar;
@@ -1041,6 +1043,11 @@ export const DogDetailModal: React.FC<DogDetailModalProps> = ({ dog, onClose, on
                 <p className="text-xs text-slate-500">Montas registradas y camadas obtenidas</p>
               </div>
 
+              {/* Algoritmo y Proyección de Celos Biológicos */}
+              {currentDog.sexo === 'HEMBRA' && (
+                <HeatPredictorCard ejemplar={currentDog} />
+              )}
+
               {/* Litters produced */}
               <div>
                 <h5 className="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
@@ -1102,44 +1109,9 @@ export const DogDetailModal: React.FC<DogDetailModalProps> = ({ dog, onClose, on
             </div>
           )}
 
-          {/* TAB 5: EXPO */}
+          {/* TAB 5: EXPO CON HISTORIAL, JUECES Y ESTADÍSTICAS */}
           {activeTab === 'EXPO' && (
-            <div className="space-y-3">
-              <h4 className="text-sm font-bold text-slate-900">Participaciones en Torneos y Exposiciones POA</h4>
-              <div className="space-y-2 text-xs">
-                {dogExpos.map((expo) => (
-                  <div
-                    key={expo.id}
-                    className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5 shadow-xs"
-                  >
-                    <div className="flex items-center justify-between">
-                      <strong className="text-sm text-slate-900 font-bold">{expo.nombreEvento}</strong>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                        {expo.puesto}
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-slate-500 flex flex-wrap gap-2">
-                      <span>Fecha: {formatDateDMY(expo.fecha)}</span>
-                      <span>•</span>
-                      <span>Lugar: {expo.lugar}</span>
-                      <span>•</span>
-                      <span>Juez: {expo.juez}</span>
-                    </div>
-                    <div className="text-blue-700 font-semibold text-[11px]">
-                      Calificación: {expo.calificacion}
-                    </div>
-                    {expo.observaciones && (
-                      <p className="text-slate-600 text-[11px] italic">&quot;{expo.observaciones}&quot;</p>
-                    )}
-                  </div>
-                ))}
-                {dogExpos.length === 0 && (
-                  <div className="p-6 text-center rounded-xl bg-slate-50 border border-slate-200 text-slate-500 text-xs">
-                    Sin participaciones de torneos registradas para este ejemplar.
-                  </div>
-                )}
-              </div>
-            </div>
+            <DogExposSubmodule dog={currentDog} />
           )}
         </div>
 

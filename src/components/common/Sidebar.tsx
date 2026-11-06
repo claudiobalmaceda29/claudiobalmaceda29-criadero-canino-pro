@@ -147,6 +147,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, onCloseMobile }) =
       title: 'GESTIÓN',
       items: [
         {
+          id: 'pizarra_diaria',
+          label: 'Pizarra Diaria',
+          icon: FolderKanban,
+        },
+        {
           id: 'insumos',
           label: 'Alimentación y Stock',
           icon: Boxes,
@@ -163,14 +168,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, onCloseMobile }) =
           icon: Trophy,
         },
         {
+          id: 'cotizador_poa',
+          label: 'Cotizador POA',
+          icon: CircleDollarSign,
+        },
+        {
           id: 'economia',
           label: 'Finanzas',
-          icon: CircleDollarSign,
+          icon: BarChart3,
         },
         {
           id: 'estadisticas',
           label: 'Estadísticas',
-          icon: BarChart3,
+          icon: Sparkles,
         },
       ],
     },

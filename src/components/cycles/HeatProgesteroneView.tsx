@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   X,
 } from 'lucide-react';
+import { HeatPredictorCard } from './HeatPredictorCard';
 
 export const HeatProgesteroneView: React.FC = () => {
   const { ciclosCelo, ejemplares, addCicloCelo, addMedicionProgesterona, currentCriaderoId } = useApp();
@@ -140,6 +141,13 @@ export const HeatProgesteroneView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Heat & Ovulation Prediction Algorithm Card */}
+      {(() => {
+        const female = hembras.find((h) => h.id === currentCiclo?.hembraId) || hembras[0];
+        if (!female) return null;
+        return <HeatPredictorCard ejemplar={female} />;
+      })()}
 
       {currentCiclo ? (
         <div className="space-y-6">

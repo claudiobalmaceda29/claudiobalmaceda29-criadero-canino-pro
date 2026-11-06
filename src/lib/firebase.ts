@@ -12,7 +12,7 @@ import {
   initializeFirestore,
   getFirestore,
   persistentLocalCache,
-  persistentMultipleTabManager,
+  persistentSingleTabManager,
   collection,
   doc,
   getDocFromServer,
@@ -57,14 +57,14 @@ export const app: FirebaseApp =
 // ==========================================
 // 2. Cloud Firestore with Offline Persistence
 // ==========================================
-// Configures multi-tab persistent IndexedDB cache for offline resilience
+// Configures persistent IndexedDB cache optimized for single-session preview
 let firestoreInstance: Firestore;
 try {
   firestoreInstance = initializeFirestore(
     app,
     {
       localCache: persistentLocalCache({
-        tabManager: persistentMultipleTabManager(),
+        tabManager: persistentSingleTabManager({}),
       }),
       ignoreUndefinedProperties: true,
     },

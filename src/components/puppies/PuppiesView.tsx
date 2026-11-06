@@ -18,9 +18,11 @@ import {
   Layers,
   FolderTree,
   Trash2,
+  HeartHandshake,
 } from 'lucide-react';
 import { PuppyDetailModal } from './PuppyDetailModal';
 import { PuppyFormModal } from './PuppyFormModal';
+import { PostVentaFollowUpModal } from './PostVentaFollowUpModal';
 import { getCollarColorHex, getCollarColorName, formatDateDMY } from '../../lib/dogUtils';
 import { deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
@@ -50,6 +52,7 @@ export const PuppiesView: React.FC = () => {
   const [initialCamadaForNewPuppy, setInitialCamadaForNewPuppy] = useState<string | undefined>(undefined);
   const [puppyToDelete, setPuppyToDelete] = useState<Cachorro | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isPostVentaOpen, setIsPostVentaOpen] = useState(false);
 
   const filteredPuppies = useMemo(() => {
     return cachorros
@@ -373,7 +376,15 @@ export const PuppiesView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <button
+            onClick={() => setIsPostVentaOpen(true)}
+            className="px-4 py-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs flex items-center gap-2 transition-all border border-indigo-200 shadow-xs hover:scale-[1.02] cursor-pointer"
+            title="Seguimiento Post-Venta a 6 meses y 1 año con WhatsApp"
+          >
+            <HeartHandshake className="w-4 h-4 text-indigo-600" />
+            <span>Fidelización Post-Venta</span>
+          </button>
           <button
             onClick={handleExportCSV}
             className="px-4 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold text-xs flex items-center gap-2 transition-all border border-slate-200 shadow-xs hover:scale-[1.02] cursor-pointer"
@@ -677,6 +688,12 @@ export const PuppiesView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Post Venta Follow Up Modal */}
+      <PostVentaFollowUpModal
+        isOpen={isPostVentaOpen}
+        onClose={() => setIsPostVentaOpen(false)}
+      />
     </div>
   );
 };

@@ -27,6 +27,8 @@ import { BackupSystemView } from './components/backup/BackupSystemView';
 import { SettingsView } from './components/settings/SettingsView';
 import { ChatView } from './components/chat/ChatView';
 import { InsumosStockView } from './components/inventory/InsumosStockView';
+import { DailyDashboard } from './components/dashboard/DailyDashboard';
+import { PricingSimulator } from './components/economics/PricingSimulator';
 
 const MainLayout: React.FC = () => {
   const {
@@ -73,6 +75,10 @@ const MainLayout: React.FC = () => {
         return <ShowsView />;
       case 'certificados':
         return <CertificatesView />;
+      case 'pizarra_diaria':
+        return <DailyDashboard />;
+      case 'cotizador_poa':
+        return <PricingSimulator />;
       case 'economia':
         return <EconomicsView />;
       case 'insumos':

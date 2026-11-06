@@ -37,6 +37,7 @@ import {
   Sparkles as SparklesIcon,
   Info,
 } from 'lucide-react';
+import { FoodRationAutoDeductModal } from './FoodRationAutoDeductModal';
 
 const CATEGORIAS_INFO: Record<
   CategoriaInsumo,
@@ -133,6 +134,7 @@ export const InsumosStockView: React.FC = () => {
 
   const [historyTargetInsumo, setHistoryTargetInsumo] = useState<Insumo | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [isRacionModalOpen, setIsRacionModalOpen] = useState(false);
 
   // Form State for Create/Edit
   const [formData, setFormData] = useState<Partial<Insumo>>({
@@ -404,7 +406,15 @@ export const InsumosStockView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <button
+            onClick={() => setIsRacionModalOpen(true)}
+            className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center gap-2 shadow-xs transition-all cursor-pointer"
+            title="Calcular raciones y descontar stock automáticamente"
+          >
+            <Utensils className="w-4 h-4" />
+            <span>Racionamiento & Descuento</span>
+          </button>
           <button
             onClick={handleOpenCreateModal}
             className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-2 shadow-sm transition-all cursor-pointer"
@@ -1540,6 +1550,12 @@ export const InsumosStockView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Racionamiento & Descuento Automático Modal */}
+      <FoodRationAutoDeductModal
+        isOpen={isRacionModalOpen}
+        onClose={() => setIsRacionModalOpen(false)}
+      />
     </div>
   );
 };
