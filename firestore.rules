@@ -86,16 +86,30 @@ service cloud.firestore {
       allow delete: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
     }
 
-    // Camadas: globally readable in read-only mode, writes restricted to owner criadero
-    match /camadas/{camadaId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(request.resource.data.criaderoId));
-      allow update: if isSignedIn() && (isSuperAdmin() || (canAccessCriadero(resource.data.criaderoId) && canAccessCriadero(request.resource.data.criaderoId)));
-      allow delete: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+    // Helper de aislamiento multi-tenant estricto (Balances, Insumos, Camadas, Gestaciones)
+    function isOwnerOfDoc(data) {
+      return isSignedIn() && (
+        isSuperAdmin() ||
+        data.criaderoId == request.auth.uid ||
+        (data.propietarioId != null && data.propietarioId == request.auth.uid) ||
+        canAccessCriadero(data.criaderoId)
+      );
     }
 
-    // Cachorros: globally readable in read-only mode, writes restricted to owner criadero
+    // Camadas: Aislamiento estricto multi-tenant por criaderoId / propietarioId
+    match /camadas/{camadaId} {
+      allow get: if isOwnerOfDoc(resource.data);
+      allow list: if isSignedIn() && (
+        isSuperAdmin() ||
+        resource.data.criaderoId == request.auth.uid ||
+        resource.data.propietarioId == request.auth.uid
+      );
+      allow create: if isOwnerOfDoc(request.resource.data);
+      allow update: if isOwnerOfDoc(resource.data) && isOwnerOfDoc(request.resource.data);
+      allow delete: if isOwnerOfDoc(resource.data);
+    }
+
+    // Cachorros: lectura protegida para el criadero propietario o superadmin
     match /cachorros/{cachorroId} {
       allow get: if isSignedIn();
       allow list: if isSignedIn();
@@ -131,13 +145,17 @@ service cloud.firestore {
       allow delete: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
     }
 
-    // Gestaciones
+    // Gestaciones / Monitoreo Reproductivo: Aislamiento estricto multi-tenant por criaderoId / propietarioId
     match /gestaciones/{gestacionId} {
-      allow get: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
-      allow list: if isSignedIn();
-      allow create: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(request.resource.data.criaderoId));
-      allow update: if isSignedIn() && (isSuperAdmin() || (canAccessCriadero(resource.data.criaderoId) && canAccessCriadero(request.resource.data.criaderoId)));
-      allow delete: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+      allow get: if isOwnerOfDoc(resource.data);
+      allow list: if isSignedIn() && (
+        isSuperAdmin() ||
+        resource.data.criaderoId == request.auth.uid ||
+        resource.data.propietarioId == request.auth.uid
+      );
+      allow create: if isOwnerOfDoc(request.resource.data);
+      allow update: if isOwnerOfDoc(resource.data) && isOwnerOfDoc(request.resource.data);
+      allow delete: if isOwnerOfDoc(resource.data);
     }
 
     // Simulaciones de Cruza
@@ -158,22 +176,42 @@ service cloud.firestore {
       allow delete: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
     }
 
-    // Transacciones Económicas
+    // Balances Financieros (transacciones / finanzas): Aislamiento estricto multi-tenant por criaderoId / propietarioId
     match /transacciones/{transId} {
-      allow get: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
-      allow list: if isSignedIn();
-      allow create: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(request.resource.data.criaderoId));
-      allow update: if isSignedIn() && (isSuperAdmin() || (canAccessCriadero(resource.data.criaderoId) && canAccessCriadero(request.resource.data.criaderoId)));
-      allow delete: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+      allow get: if isOwnerOfDoc(resource.data);
+      allow list: if isSignedIn() && (
+        isSuperAdmin() ||
+        resource.data.criaderoId == request.auth.uid ||
+        resource.data.propietarioId == request.auth.uid
+      );
+      allow create: if isOwnerOfDoc(request.resource.data);
+      allow update: if isOwnerOfDoc(resource.data) && isOwnerOfDoc(request.resource.data);
+      allow delete: if isOwnerOfDoc(resource.data);
     }
 
-    // Insumos y Control de Stock
+    match /finanzas/{finanzaId} {
+      allow get: if isOwnerOfDoc(resource.data);
+      allow list: if isSignedIn() && (
+        isSuperAdmin() ||
+        resource.data.criaderoId == request.auth.uid ||
+        resource.data.propietarioId == request.auth.uid
+      );
+      allow create: if isOwnerOfDoc(request.resource.data);
+      allow update: if isOwnerOfDoc(resource.data) && isOwnerOfDoc(request.resource.data);
+      allow delete: if isOwnerOfDoc(resource.data);
+    }
+
+    // Inventario de Insumos (alimentos, vacunas, pipetas): Aislamiento estricto multi-tenant por criaderoId / propietarioId
     match /insumos/{insumoId} {
-      allow get: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
-      allow list: if isSignedIn();
-      allow create: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(request.resource.data.criaderoId));
-      allow update: if isSignedIn() && (isSuperAdmin() || (canAccessCriadero(resource.data.criaderoId) && canAccessCriadero(request.resource.data.criaderoId)));
-      allow delete: if isSignedIn() && (isSuperAdmin() || canAccessCriadero(resource.data.criaderoId));
+      allow get: if isOwnerOfDoc(resource.data);
+      allow list: if isSignedIn() && (
+        isSuperAdmin() ||
+        resource.data.criaderoId == request.auth.uid ||
+        resource.data.propietarioId == request.auth.uid
+      );
+      allow create: if isOwnerOfDoc(request.resource.data);
+      allow update: if isOwnerOfDoc(resource.data) && isOwnerOfDoc(request.resource.data);
+      allow delete: if isOwnerOfDoc(resource.data);
     }
 
     // Auditoría

@@ -19,6 +19,7 @@ export const GestationTimelineView: React.FC = () => {
     completarHitoGestacion,
     registrarPartoReal,
     setActiveTab,
+    currentUser,
   } = useApp();
 
   const [selectedGestId, setSelectedGestId] = useState<string>(gestaciones[0]?.id || '');
@@ -61,7 +62,7 @@ export const GestationTimelineView: React.FC = () => {
     if (!currentGest) return;
 
     const camadaData: Omit<Camada, 'id' | 'createdAt'> = {
-      criaderoId: currentGest.criaderoId,
+      criaderoId: currentUser?.uid || currentUser?.id || currentGest.criaderoId,
       identificador: identificadorCamada || `Camada de ${currentGest.hembraNombre}`,
       padreId: currentGest.machoId,
       padreNombre: currentGest.machoNombre,

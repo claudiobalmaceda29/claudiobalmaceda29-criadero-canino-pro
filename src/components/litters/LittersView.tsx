@@ -40,6 +40,7 @@ export const LittersView: React.FC = () => {
     deleteCachorro,
     addEjemplar,
     currentCriaderoId,
+    currentUser,
     setActiveTab,
     exportToCSV,
   } = useApp();
@@ -327,7 +328,7 @@ export const LittersView: React.FC = () => {
       }
 
       const data: Omit<Camada, 'id' | 'createdAt'> = {
-        criaderoId: currentCriaderoId,
+        criaderoId: currentUser?.uid || currentUser?.id || currentCriaderoId,
         identificador,
         padreId: finalPadreId,
         padreNombre: finalPadreNombre,

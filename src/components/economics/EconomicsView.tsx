@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 
 export const EconomicsView: React.FC = () => {
-  const { transacciones, camadas, addTransaccion, deleteTransaccion, currentCriaderoId, exportToCSV, openPrintModal } = useApp();
+  const { transacciones, camadas, addTransaccion, deleteTransaccion, currentCriaderoId, currentUser, firebaseUser, exportToCSV, openPrintModal } = useApp();
 
   const [filterMoneda, setFilterMoneda] = useState<'ARS' | 'USD'>('ARS');
   const [filterTipo, setFilterTipo] = useState<'TODOS' | 'INGRESO' | 'GASTO'>('TODOS');
@@ -82,7 +82,7 @@ export const EconomicsView: React.FC = () => {
     if (!concepto.trim() || monto <= 0) return;
 
     addTransaccion({
-      criaderoId: currentCriaderoId,
+      criaderoId: currentUser?.uid || firebaseUser?.uid || currentCriaderoId,
       tipo,
       categoria,
       monto,

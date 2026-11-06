@@ -208,6 +208,7 @@ export interface HitoGestacion {
 export interface Gestacion {
   id: string;
   criaderoId: string;
+  propietarioId?: string;
   hembraId: string;
   hembraNombre: string;
   machoId: string;
@@ -236,6 +237,7 @@ export type EstadoCamada =
 export interface Camada {
   id: string;
   criaderoId: string;
+  propietarioId?: string;
   identificador: string; // ej: "Camada 'A' 2026"
   padreId: string;
   padreNombre: string;
@@ -405,6 +407,7 @@ export type CategoriaEconomica =
 export interface TransaccionEconomica {
   id: string;
   criaderoId: string;
+  propietarioId?: string;
   tipo: TipoTransaccion;
   categoria: CategoriaEconomica;
   camadaId?: string;
@@ -510,6 +513,7 @@ export interface MovimientoInsumo {
 export interface Insumo {
   id: string;
   criaderoId: string;
+  propietarioId?: string;
   nombre: string;
   categoria: CategoriaInsumo;
   marca?: string;

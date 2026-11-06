@@ -293,7 +293,7 @@ export const InsumosStockView: React.FC = () => {
       });
     } else {
       await addInsumo({
-        criaderoId: currentCriadero?.id || 'cria-demo',
+        criaderoId: currentUser?.uid || currentUser?.id || currentCriadero?.id || 'cria-demo',
         nombre: formData.nombre.trim(),
         categoria: formData.categoria || 'ALIMENTO',
         marca: formData.marca?.trim(),

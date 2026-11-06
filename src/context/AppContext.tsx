@@ -390,6 +390,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const DEMO_USER: User = useMemo(
     () => ({
       id: 'usr-demo',
+      uid: 'usr-demo',
       nombre: 'Visitante Demostración',
       email: 'demo@micriaderocanino.com.ar',
       rol: 'DEMO',
@@ -573,6 +574,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const savedCriaderoId = localStorage.getItem('current_criadero_id') || 'cria-demo';
           const adminUser: User = {
             id: fbUser.uid,
+            uid: fbUser.uid,
             nombre: fbUser.displayName || 'Administrador Demo (SuperAdmin)',
             email: fbUser.email || 'admin@criaderodemo.com.ar',
             rol: 'SUPER_ADMIN',
@@ -596,6 +598,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const userSnap = await getDoc(doc(db, 'users', fbUser.uid));
           if (userSnap.exists()) {
             const userData = userSnap.data() as User;
+            userData.uid = fbUser.uid;
             if (userData.criaderoId) {
               setCurrentUser(userData);
               setCurrentCriaderoId(userData.criaderoId);
@@ -876,6 +879,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const unsubs: (() => void)[] = [];
 
     try {
+      const isSuperAdminEmail =
+        firebaseUser.email?.toLowerCase() === 'admin@criaderodemo.com.ar' ||
+        firebaseUser.email?.toLowerCase() === 'claudiobalmaceda.ok@gmail.com' ||
+        currentUser.rol === 'SUPER_ADMIN';
+
+      // Identificador de criadero / tenant estricto: currentUser.uid (o firebaseUser.uid)
+      const activeTenantUid = currentUser?.uid || firebaseUser?.uid || currentUser?.id || currentCriaderoId;
+
       // 1. Criaderos listener
       const criaderosRef = collection(db, 'criaderos');
       const unsubCriaderos = onSnapshot(
@@ -910,9 +921,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
       unsubs.push(unsubEjemplares);
 
-      // 3. Camadas listener
+      // 3. Camadas listener (Aislamiento estricto multi-tenant por criaderoId == currentUser.uid)
       const camadasRef = collection(db, 'camadas');
-      const qCamadas = query(camadasRef, where('criaderoId', '==', currentCriaderoId));
+      const qCamadas = isSuperAdminEmail
+        ? query(camadasRef)
+        : query(camadasRef, where('criaderoId', '==', activeTenantUid));
 
       const unsubCamadas = onSnapshot(
         qCamadas,
@@ -927,7 +940,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // 4. Cachorros listener
       const cachorrosRef = collection(db, 'cachorros');
-      const qCachorros = query(cachorrosRef, where('criaderoId', '==', currentCriaderoId));
+      const qCachorros = isSuperAdminEmail
+        ? query(cachorrosRef)
+        : query(cachorrosRef, where('criaderoId', '==', activeTenantUid));
 
       const unsubCachorros = onSnapshot(
         qCachorros,
@@ -955,9 +970,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
       unsubs.push(unsubMontas);
 
-      // 6. Gestaciones listener
+      // 6. Gestaciones listener (Aislamiento estricto multi-tenant por criaderoId == currentUser.uid)
       const gestacionesRef = collection(db, 'gestaciones');
-      const qGestaciones = query(gestacionesRef, where('criaderoId', '==', currentCriaderoId));
+      const qGestaciones = isSuperAdminEmail
+        ? query(gestacionesRef)
+        : query(gestacionesRef, where('criaderoId', '==', activeTenantUid));
 
       const unsubGest = onSnapshot(
         qGestaciones,
@@ -985,9 +1002,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
       unsubs.push(unsubRegistros);
 
-      // 8. Transacciones Económicas listener
+      // 8. Transacciones Económicas / Balances listener (Aislamiento estricto multi-tenant por criaderoId == currentUser.uid)
       const transaccionesRef = collection(db, 'transacciones');
-      const qTransacciones = query(transaccionesRef, where('criaderoId', '==', currentCriaderoId));
+      const qTransacciones = isSuperAdminEmail
+        ? query(transaccionesRef)
+        : query(transaccionesRef, where('criaderoId', '==', activeTenantUid));
 
       const unsubTransacciones = onSnapshot(
         qTransacciones,
@@ -1030,9 +1049,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
       unsubs.push(unsubExposiciones);
 
-      // 11. Insumos y Control de Stock listener
+      // 11. Insumos y Control de Stock listener (Aislamiento estricto multi-tenant por criaderoId == currentUser.uid)
       const insumosRef = collection(db, 'insumos');
-      const qInsumos = query(insumosRef, where('criaderoId', '==', currentCriaderoId));
+      const qInsumos = isSuperAdminEmail
+        ? query(insumosRef)
+        : query(insumosRef, where('criaderoId', '==', activeTenantUid));
 
       const unsubInsumos = onSnapshot(
         qInsumos,
@@ -1047,9 +1068,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // 12. Chats listener (Real-time 1 a 1 entre criadores)
       const chatsRef = collection(db, 'chats');
-      const isSuperAdminEmail =
-        firebaseUser.email?.toLowerCase() === 'claudiobalmaceda.ok@gmail.com' ||
-        currentUser.rol === 'SUPER_ADMIN';
 
       const qChats = isSuperAdminEmail
         ? query(chatsRef)
@@ -2032,10 +2050,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Gestación
   const addGestacion = (data: Omit<Gestacion, 'id'>): Gestacion => {
+    const tenantUid = currentUser?.uid || firebaseUser?.uid || currentUser?.id || currentCriaderoId;
     const g: Gestacion = {
       ...data,
       id: `gest-${Date.now()}`,
-      criaderoId: data.criaderoId || currentCriaderoId,
+      criaderoId: tenantUid, // Inyección automática obligatoria de currentUser.uid
+      propietarioId: tenantUid,
     };
     setGestaciones((prev) => [g, ...prev]);
     if (firebaseUser) {
@@ -2108,10 +2128,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Camadas
   const addCamada = (data: Omit<Camada, 'id' | 'createdAt'>): Camada => {
+    const tenantUid = currentUser?.uid || firebaseUser?.uid || currentUser?.id || currentCriaderoId;
     const c: Camada = {
       ...data,
       id: `cam-${Date.now()}`,
-      criaderoId: data.criaderoId || currentCriaderoId,
+      criaderoId: tenantUid, // Inyección automática obligatoria de currentUser.uid
+      propietarioId: tenantUid,
       createdAt: new Date().toISOString(),
     };
     setCamadas((prev) => [c, ...prev]);
@@ -2387,10 +2409,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Transacciones
   const addTransaccion = (data: Omit<TransaccionEconomica, 'id'>) => {
+    const tenantUid = currentUser?.uid || firebaseUser?.uid || currentUser?.id || currentCriaderoId;
     const t: TransaccionEconomica = {
       ...data,
       id: `tx-${Date.now()}`,
-      criaderoId: data.criaderoId || currentCriaderoId,
+      criaderoId: tenantUid, // Inyección automática obligatoria de currentUser.uid
+      propietarioId: tenantUid,
     };
     setTransacciones((prev) => [t, ...prev]);
     if (firebaseUser) {
@@ -2411,6 +2435,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Insumos y Stock Logístico
   const addInsumo = async (data: Omit<Insumo, 'id' | 'ultimaActualizacion'>): Promise<Insumo> => {
+    const tenantUid = currentUser?.uid || firebaseUser?.uid || currentUser?.id || currentCriaderoId;
     const today = new Date().toISOString().split('T')[0];
     const initialMovimientos: MovimientoInsumo[] = data.historialMovimientos || [
       {
@@ -2426,7 +2451,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const newItem: Insumo = {
       ...data,
       id: `ins-${Date.now()}`,
-      criaderoId: data.criaderoId || currentCriaderoId,
+      criaderoId: tenantUid, // Inyección automática obligatoria de currentUser.uid
+      propietarioId: tenantUid,
       ultimaActualizacion: today,
       historialMovimientos: initialMovimientos,
     };
