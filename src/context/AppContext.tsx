@@ -23,6 +23,14 @@ import {
   MovimientoInsumo,
 } from '../types';
 import { cleanForFirestore } from '../lib/dogUtils';
+import toast from 'react-hot-toast';
+import {
+  DEMO_CRIADERO_ID,
+  DEMO_USER_ID,
+  DEMO_USER as SEED_DEMO_USER,
+  DEMO_CRIADERO as SEED_DEMO_CRIADERO,
+  getFullDemoSeedData,
+} from '../data/seedDemoData';
 import {
   INITIAL_CRIADEROS,
   INITIAL_USERS,
@@ -98,6 +106,7 @@ interface AppContextType {
   setCurrentUser: (user: User) => void;
   users: User[];
   isDemoMode: boolean;
+  isReadOnlyDemo: boolean;
   setIsDemoMode: (val: boolean) => void;
   isRegisterModalOpen: boolean;
   setIsRegisterModalOpen: (val: boolean) => void;
@@ -421,6 +430,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Default active user is DEMO visitor on fresh page load
   const [currentUser, setCurrentUser] = useState<User>(DEMO_USER);
+
+  // Read-only guard for demo account to protect sample data
+  const isReadOnlyDemo = useMemo(() => {
+    return (
+      isDemoMode ||
+      currentUser?.rol === 'DEMO' ||
+      currentCriaderoId === DEMO_CRIADERO_ID ||
+      currentCriaderoId === 'cria-demo'
+    );
+  }, [isDemoMode, currentUser?.rol, currentCriaderoId]);
 
   const [ejemplares, setEjemplares] = useState<Ejemplar[]>(
     Array.isArray(localData.ejemplares) ? localData.ejemplares : INITIAL_EJEMPLARES
@@ -847,28 +866,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Return to interactive DEMO mode
+  // Return to interactive DEMO mode with full rich populated seed data
   const enterDemoMode = () => {
+    const seed = getFullDemoSeedData();
     setIsDemoMode(true);
-    setCurrentUser(DEMO_USER);
-    setCurrentCriaderoId('cria-demo');
+    setCurrentUser(SEED_DEMO_USER);
+    setCurrentCriaderoId(DEMO_CRIADERO_ID);
+
+    // Register or update demo criadero in local state
+    setCriaderos((prev) => {
+      const exists = prev.some((c) => c.id === DEMO_CRIADERO_ID);
+      return exists
+        ? prev.map((c) => (c.id === DEMO_CRIADERO_ID ? SEED_DEMO_CRIADERO : c))
+        : [SEED_DEMO_CRIADERO, ...prev];
+    });
+
     try {
-      localStorage.setItem('current_criadero_id', 'cria-demo');
+      localStorage.setItem('current_criadero_id', DEMO_CRIADERO_ID);
       localStorage.setItem('is_demo_mode', 'true');
     } catch {}
-    setEjemplares(INITIAL_EJEMPLARES);
-    setCamadas(INITIAL_CAMADAS);
-    setCachorros(INITIAL_CACHORROS);
-    setMontas(INITIAL_MONTAS);
-    setGestaciones(INITIAL_GESTACIONES);
-    setRegistrosSanitarios(INITIAL_REGISTROS_SANITARIOS);
-    setTransacciones(INITIAL_TRANSACCIONES);
-    setInsumos(INITIAL_INSUMOS);
-    setCiclosCelo(INITIAL_CICLOS_CELO);
-    setExposiciones(INITIAL_EXPOSICIONES);
+
+    setEjemplares(seed.ejemplares);
+    setCamadas(seed.camadas);
+    setCachorros(seed.cachorros);
+    setMontas(seed.montas);
+    setGestaciones(seed.gestaciones);
+    setRegistrosSanitarios(seed.registrosSanitarios);
+    setTransacciones(seed.transacciones);
+    setInsumos(seed.insumos);
+    setCiclosCelo(seed.ciclosCelo);
+    setExposiciones(seed.exposiciones);
     setChats(INITIAL_CHATS);
     setActiveChatId(null);
     setActiveChatMessages([]);
+
+    toast.success('¡Bienvenido al Criadero Demo "Von Haus Real"! Datos completos cargados.', {
+      icon: '🐕',
+      duration: 4000,
+    });
   };
 
   // Firestore Realtime Listeners (Active ONLY when in Real Mode and Authenticated)
@@ -884,8 +919,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         firebaseUser.email?.toLowerCase() === 'claudiobalmaceda.ok@gmail.com' ||
         currentUser.rol === 'SUPER_ADMIN';
 
-      // Identificador de criadero / tenant estricto: currentUser.uid (o firebaseUser.uid)
-      const activeTenantUid = currentUser?.uid || firebaseUser?.uid || currentUser?.id || currentCriaderoId;
+      // Identificador de criadero / tenant estricto: prioritariamente firebaseUser.uid (o currentUser.uid)
+      const activeTenantUid = firebaseUser?.uid || currentUser?.uid || currentUser?.id || currentCriaderoId;
 
       // 1. Criaderos listener
       const criaderosRef = collection(db, 'criaderos');
@@ -1514,12 +1549,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [exposiciones, currentCriaderoId]);
 
   const currentTransacciones = useMemo(() => {
-    return transacciones.filter((t) => t.criaderoId === currentCriaderoId);
-  }, [transacciones, currentCriaderoId]);
+    return transacciones.filter(
+      (t) =>
+        t.criaderoId === currentCriaderoId ||
+        (currentUser?.id && t.criaderoId === currentUser.id) ||
+        (firebaseUser?.uid && t.criaderoId === firebaseUser.uid)
+    );
+  }, [transacciones, currentCriaderoId, currentUser, firebaseUser]);
 
   const currentInsumos = useMemo(() => {
-    return insumos.filter((i) => i.criaderoId === currentCriaderoId);
-  }, [insumos, currentCriaderoId]);
+    return insumos.filter(
+      (i) =>
+        i.criaderoId === currentCriaderoId ||
+        (currentUser?.id && i.criaderoId === currentUser.id) ||
+        ((currentUser as any)?.uid && i.criaderoId === (currentUser as any).uid) ||
+        (firebaseUser?.uid && i.criaderoId === firebaseUser.uid) ||
+        (i.propietarioId && (i.propietarioId === currentCriaderoId || (firebaseUser?.uid && i.propietarioId === firebaseUser.uid)))
+    );
+  }, [insumos, currentCriaderoId, currentUser, firebaseUser]);
 
   // Server-side COI Calculation implementation
   const calculateCOIServer = async (
@@ -1803,6 +1850,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteEjemplar = async (id: string, motivo?: string): Promise<boolean> => {
+    if (isReadOnlyDemo) {
+      toast.error('Modo Demo protegido: Los ejemplares de muestra están protegidos contra eliminación.');
+      return false;
+    }
     return retirarEjemplar(id, motivo);
   };
 
@@ -1891,6 +1942,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteRegistroSanitario = async (id: string): Promise<void> => {
+    if (isReadOnlyDemo) {
+      toast.error('Modo Demo protegido: Las libretas sanitarias de muestra están protegidas.');
+      return;
+    }
     const existing = registrosSanitarios.find((r) => r.id === id);
     if (existing && !canManageCriaderoResource(existing.criaderoId)) {
       console.warn('Seguridad: Un criador no puede eliminar datos de otro criadero.');
@@ -1995,6 +2050,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteMonta = (id: string) => {
+    if (isReadOnlyDemo) {
+      toast.error('Modo Demo protegido: Los servicios reproductivos de muestra están protegidos.');
+      return;
+    }
     const existing = montas.find((m) => m.id === id);
     if (existing && !canManageCriaderoResource(existing.criaderoId)) {
       console.warn('Seguridad: Un criador no puede eliminar datos de otro criadero.');
@@ -2081,6 +2140,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteGestacion = (id: string) => {
+    if (isReadOnlyDemo) {
+      toast.error('Modo Demo protegido: Las gestaciones de muestra están protegidas.');
+      return;
+    }
     const existing = gestaciones.find((g) => g.id === id);
     if (existing && !canManageCriaderoResource(existing.criaderoId)) {
       console.warn('Seguridad: Un criador no puede eliminar datos de otro criadero.');
@@ -2189,6 +2252,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteCamada = (id: string) => {
+    if (isReadOnlyDemo) {
+      toast.error('Modo Demo protegido: Las camadas de muestra están protegidas contra eliminación.');
+      return;
+    }
     const existing = camadas.find((c) => c.id === id);
     if (existing && !canManageCriaderoResource(existing.criaderoId)) {
       console.warn('Seguridad: Un criador no puede eliminar datos de otro criadero.');
@@ -2255,6 +2322,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteCachorro = (id: string) => {
+    if (isReadOnlyDemo) {
+      toast.error('Modo Demo protegido: Los cachorros de muestra están protegidos contra eliminación.');
+      return;
+    }
     const existing = cachorros.find((c) => c.id === id);
     if (existing && !canManageCriaderoResource(existing.criaderoId)) {
       console.warn('Seguridad: Un criador no puede eliminar datos de otro criadero.');
@@ -2425,6 +2496,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteTransaccion = (id: string) => {
+    if (isReadOnlyDemo) {
+      toast.error('Modo Demo protegido: Las transacciones financieras de muestra están protegidas.');
+      return;
+    }
     setTransacciones((prev) => prev.filter((t) => t.id !== id));
     if (firebaseUser) {
       deleteDoc(doc(db, 'transacciones', id)).catch((err) =>
@@ -2435,23 +2510,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Insumos y Stock Logístico
   const addInsumo = async (data: Omit<Insumo, 'id' | 'ultimaActualizacion'>): Promise<Insumo> => {
-    const tenantUid = currentUser?.uid || firebaseUser?.uid || currentUser?.id || currentCriaderoId;
+    const tenantUid = firebaseUser?.uid || currentUser?.uid || currentUser?.id || currentCriaderoId;
     const today = new Date().toISOString().split('T')[0];
     const initialMovimientos: MovimientoInsumo[] = data.historialMovimientos || [
       {
         id: `mov-${Date.now()}`,
         fecha: today,
         tipo: 'INGRESO',
-        cantidad: data.cantidadActual,
+        cantidad: Number(data.cantidadActual) || 0,
         motivo: 'Stock inicial registrado en el sistema',
-        usuarioNombre: currentUser.nombre || 'Administrador',
+        usuarioNombre: currentUser?.nombre || 'Administrador',
       },
     ];
 
     const newItem: Insumo = {
       ...data,
       id: `ins-${Date.now()}`,
-      criaderoId: tenantUid, // Inyección automática obligatoria de currentUser.uid
+      criaderoId: tenantUid, // Inyección automática obligatoria de tenantUid (firebaseUser.uid)
       propietarioId: tenantUid,
       ultimaActualizacion: today,
       historialMovimientos: initialMovimientos,
@@ -2480,6 +2555,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch (err: any) {
         console.error('Error guardando insumo en Firestore:', err);
         handleFirestoreError(err, OperationType.CREATE, 'insumos');
+        throw err;
       }
     }
 
@@ -2522,6 +2598,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteInsumo = async (id: string): Promise<boolean> => {
+    if (isReadOnlyDemo) {
+      toast.error('Modo Demo protegido: Los insumos de muestra están protegidos contra eliminación.');
+      return false;
+    }
     setInsumos((prev) => prev.filter((item) => item.id !== id));
 
     try {
@@ -2912,6 +2992,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCurrentUser,
         users,
         isDemoMode,
+        isReadOnlyDemo,
         setIsDemoMode,
         isRegisterModalOpen,
         setIsRegisterModalOpen,

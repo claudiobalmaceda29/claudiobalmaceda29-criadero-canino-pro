@@ -307,6 +307,17 @@ export const Header: React.FC<HeaderProps> = ({ onToggleMobileMenu }) => {
                         <LogIn className="w-3.5 h-3.5 text-blue-500" />
                         <span>Iniciar Sesión / Acceder</span>
                       </button>
+
+                      <button
+                        onClick={() => {
+                          enterDemoMode();
+                          setShowUserMenu(false);
+                        }}
+                        className="w-full text-left px-3 py-1.5 rounded-lg text-xs font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 flex items-center gap-2 cursor-pointer mt-1"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Recargar Datos Demo Poblados</span>
+                      </button>
                     </>
                   ) : (
                     <>

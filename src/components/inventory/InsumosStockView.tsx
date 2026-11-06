@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
+import toast from 'react-hot-toast';
 import {
   Insumo,
   CategoriaInsumo,
@@ -111,6 +112,7 @@ export const InsumosStockView: React.FC = () => {
     ajustarStockInsumo,
     currentUser,
     currentCriadero,
+    isReadOnlyDemo,
   } = useApp();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -119,8 +121,9 @@ export const InsumosStockView: React.FC = () => {
   const [onlyLowStock, setOnlyLowStock] = useState(false);
   const [viewMode, setViewMode] = useState<'CARDS' | 'TABLE'>('CARDS');
 
-  // Modal states
+  // Modal and loading states
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [editingInsumo, setEditingInsumo] = useState<Insumo | null>(null);
 
   const [isConsumoModalOpen, setIsConsumoModalOpen] = useState(false);
@@ -261,68 +264,80 @@ export const InsumosStockView: React.FC = () => {
   // Save Create or Edit
   const handleSaveForm = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.nombre?.trim()) return;
-
-    if (editingInsumo) {
-      await updateInsumo(editingInsumo.id, {
-        nombre: formData.nombre.trim(),
-        categoria: formData.categoria || 'ALIMENTO',
-        marca: formData.marca?.trim(),
-        cantidadActual: Number(formData.cantidadActual) || 0,
-        unidadMedida: formData.unidadMedida || 'UNIDADES',
-        stockMinimo: Number(formData.stockMinimo) || 1,
-        ubicacion: formData.ubicacion || 'DEPOSITO',
-        temperaturaHeladera:
-          formData.categoria === 'VACUNAS' || formData.ubicacion === 'HELADERA'
-            ? formData.temperaturaHeladera || '2°C a 8°C'
-            : undefined,
-        lote: formData.lote?.trim(),
-        fechaVencimiento: formData.fechaVencimiento || undefined,
-        pesoPorUnidadKg:
-          formData.categoria === 'ALIMENTO'
-            ? Number(formData.pesoPorUnidadKg) || undefined
-            : undefined,
-        consumoDiarioEstimado:
-          formData.categoria === 'ALIMENTO'
-            ? Number(formData.consumoDiarioEstimado) || undefined
-            : undefined,
-        costoUnitario: Number(formData.costoUnitario) || undefined,
-        moneda: formData.moneda || 'ARS',
-        proveedor: formData.proveedor?.trim(),
-        observaciones: formData.observaciones?.trim(),
-      });
-    } else {
-      await addInsumo({
-        criaderoId: currentUser?.uid || currentUser?.id || currentCriadero?.id || 'cria-demo',
-        nombre: formData.nombre.trim(),
-        categoria: formData.categoria || 'ALIMENTO',
-        marca: formData.marca?.trim(),
-        cantidadActual: Number(formData.cantidadActual) || 0,
-        unidadMedida: formData.unidadMedida || 'UNIDADES',
-        stockMinimo: Number(formData.stockMinimo) || 1,
-        ubicacion: formData.ubicacion || 'DEPOSITO',
-        temperaturaHeladera:
-          formData.categoria === 'VACUNAS' || formData.ubicacion === 'HELADERA'
-            ? formData.temperaturaHeladera || '2°C a 8°C'
-            : undefined,
-        lote: formData.lote?.trim(),
-        fechaVencimiento: formData.fechaVencimiento || undefined,
-        pesoPorUnidadKg:
-          formData.categoria === 'ALIMENTO'
-            ? Number(formData.pesoPorUnidadKg) || undefined
-            : undefined,
-        consumoDiarioEstimado:
-          formData.categoria === 'ALIMENTO'
-            ? Number(formData.consumoDiarioEstimado) || undefined
-            : undefined,
-        costoUnitario: Number(formData.costoUnitario) || undefined,
-        moneda: formData.moneda || 'ARS',
-        proveedor: formData.proveedor?.trim(),
-        observaciones: formData.observaciones?.trim(),
-      });
+    if (!formData.nombre?.trim()) {
+      toast.error('Por favor ingresá el nombre del insumo');
+      return;
     }
 
-    setIsFormModalOpen(false);
+    setIsSaving(true);
+    try {
+      if (editingInsumo) {
+        await updateInsumo(editingInsumo.id, {
+          nombre: formData.nombre.trim(),
+          categoria: formData.categoria || 'ALIMENTO',
+          marca: formData.marca?.trim() || '',
+          cantidadActual: Number(formData.cantidadActual) || 0,
+          unidadMedida: formData.unidadMedida || 'UNIDADES',
+          stockMinimo: Number(formData.stockMinimo) || 1,
+          ubicacion: formData.ubicacion || 'DEPOSITO',
+          temperaturaHeladera:
+            formData.categoria === 'VACUNAS' || formData.ubicacion === 'HELADERA'
+              ? formData.temperaturaHeladera || '2°C a 8°C'
+              : undefined,
+          lote: formData.lote?.trim() || undefined,
+          fechaVencimiento: formData.fechaVencimiento || undefined,
+          pesoPorUnidadKg:
+            formData.categoria === 'ALIMENTO'
+              ? Number(formData.pesoPorUnidadKg) || undefined
+              : undefined,
+          consumoDiarioEstimado:
+            formData.categoria === 'ALIMENTO'
+              ? Number(formData.consumoDiarioEstimado) || undefined
+              : undefined,
+          costoUnitario: Number(formData.costoUnitario) || undefined,
+          moneda: formData.moneda || 'ARS',
+          proveedor: formData.proveedor?.trim() || undefined,
+          observaciones: formData.observaciones?.trim() || undefined,
+        });
+        toast.success(`Insumo "${formData.nombre}" actualizado correctamente`);
+      } else {
+        await addInsumo({
+          criaderoId: currentUser?.uid || currentUser?.id || currentCriadero?.id || 'demo_criadero_123',
+          nombre: formData.nombre.trim(),
+          categoria: formData.categoria || 'ALIMENTO',
+          marca: formData.marca?.trim() || '',
+          cantidadActual: Number(formData.cantidadActual) || 0,
+          unidadMedida: formData.unidadMedida || 'UNIDADES',
+          stockMinimo: Number(formData.stockMinimo) || 1,
+          ubicacion: formData.ubicacion || 'DEPOSITO',
+          temperaturaHeladera:
+            formData.categoria === 'VACUNAS' || formData.ubicacion === 'HELADERA'
+              ? formData.temperaturaHeladera || '2°C a 8°C'
+              : undefined,
+          lote: formData.lote?.trim() || undefined,
+          fechaVencimiento: formData.fechaVencimiento || undefined,
+          pesoPorUnidadKg:
+            formData.categoria === 'ALIMENTO'
+              ? Number(formData.pesoPorUnidadKg) || undefined
+              : undefined,
+          consumoDiarioEstimado:
+            formData.categoria === 'ALIMENTO'
+              ? Number(formData.consumoDiarioEstimado) || undefined
+              : undefined,
+          costoUnitario: Number(formData.costoUnitario) || undefined,
+          moneda: formData.moneda || 'ARS',
+          proveedor: formData.proveedor?.trim() || undefined,
+          observaciones: formData.observaciones?.trim() || undefined,
+        });
+        toast.success(`Insumo "${formData.nombre}" agregado con éxito al stock`);
+      }
+      setIsFormModalOpen(false);
+    } catch (err: any) {
+      console.error('Error al guardar insumo:', err);
+      toast.error('No se pudo guardar el insumo en la base de datos: ' + (err?.message || 'Error en Firestore'));
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Open Consumo Modal
@@ -344,6 +359,7 @@ export const InsumosStockView: React.FC = () => {
       consumoCantidad,
       consumoMotivo.trim() || undefined
     );
+    toast.success(`Consumo registrado: -${consumoCantidad} ${consumoTargetInsumo.unidadMedida}`);
     setIsConsumoModalOpen(false);
   };
 
@@ -356,8 +372,16 @@ export const InsumosStockView: React.FC = () => {
 
   // Confirm Delete
   const handleConfirmDelete = async () => {
+    if (isReadOnlyDemo) {
+      toast.error('Modo Demo protegido: Los insumos de muestra no pueden eliminarse.');
+      setDeleteConfirmId(null);
+      return;
+    }
     if (deleteConfirmId) {
-      await deleteInsumo(deleteConfirmId);
+      const ok = await deleteInsumo(deleteConfirmId);
+      if (ok) {
+        toast.success('Insumo eliminado del inventario');
+      }
       setDeleteConfirmId(null);
     }
   };
@@ -1292,9 +1316,19 @@ export const InsumosStockView: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition-all cursor-pointer"
+                  disabled={isSaving}
+                  className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-xs shadow-xs transition-all cursor-pointer flex items-center gap-2"
                 >
-                  {editingInsumo ? 'Guardar Cambios' : 'Registrar Insumo'}
+                  {isSaving && (
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  )}
+                  <span>
+                    {isSaving
+                      ? 'Guardando...'
+                      : editingInsumo
+                      ? 'Guardar Cambios'
+                      : 'Registrar Insumo'}
+                  </span>
                 </button>
               </div>
             </form>

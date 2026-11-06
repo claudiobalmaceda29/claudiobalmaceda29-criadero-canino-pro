@@ -25,6 +25,7 @@ export const RegisterKennelModal: React.FC = () => {
     registerNewCriadero,
     enterRealMode,
     isDemoMode,
+    enterDemoMode,
     currentUser,
   } = useApp();
 
@@ -211,6 +212,25 @@ export const RegisterKennelModal: React.FC = () => {
                     <span>Continuar con Google</span>
                   </>
                 )}
+              </button>
+
+              <div className="relative flex items-center justify-center my-3">
+                <div className="border-t border-slate-200 dark:border-slate-800 w-full" />
+                <span className="bg-white dark:bg-[#0d1526] px-2 text-[10px] uppercase tracking-wider text-slate-400 font-bold absolute">
+                  o probá la plataforma
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  enterDemoMode();
+                  setIsRegisterModalOpen(false);
+                }}
+                className="w-full py-2.5 px-4 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 font-bold text-xs border border-amber-300 dark:border-amber-700/60 shadow-xs flex items-center justify-center gap-2 transition-all cursor-pointer"
+              >
+                <Sparkles className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                <span>Acceder a Demo (Cuenta de Muestra Poblada "Von Haus Real")</span>
               </button>
             </div>
           )}
