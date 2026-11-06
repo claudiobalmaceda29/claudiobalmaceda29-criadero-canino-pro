@@ -17,12 +17,18 @@ import {
   Camera,
   Upload,
   Loader2,
+  Utensils,
+  Scale,
 } from 'lucide-react';
 
 import { PuppyFormModal } from '../puppies/PuppyFormModal';
 import { getCollarColorHex, getCollarColorName, formatDateDMY } from '../../lib/dogUtils';
 import { collection, query, where, onSnapshot, deleteDoc, doc } from 'firebase/firestore';
 import { db, uploadDogPhoto } from '../../lib/firebase';
+import {
+  calcularConsumoCamadaConFreno,
+  obtenerEtapaNutricionalCachorro,
+} from '../../utils/puppyNutrition';
 
 // ============================================================================
 // CONFIGURACIÓN DE IMAGEN POR DEFECTO PARA CAMADAS
@@ -644,6 +650,61 @@ export const LittersView: React.FC = () => {
                       <div className="text-[9px] text-slate-500 dark:text-slate-400 uppercase font-bold">Vivos</div>
                     </div>
                   </div>
+
+                  {/* Etapa de Alimentación Dinámica & Freno de Racionamiento */}
+                  {camada.fechaNacimiento && (() => {
+                    const consumoInfo = calcularConsumoCamadaConFreno(camada, pupsInLitter);
+                    const etapa = consumoInfo.etapa;
+
+                    return (
+                      <div className="p-3.5 rounded-xl bg-gradient-to-br from-amber-50/80 via-orange-50/30 to-slate-50 dark:from-slate-800/90 dark:to-slate-900 border border-amber-200/80 dark:border-amber-900/50 space-y-2 shadow-2xs">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] uppercase font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1.5 tracking-wider">
+                            <Utensils className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                            <span>Etapa Nutricional ({etapa.rangoSemanas})</span>
+                          </span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${etapa.badgeColor}`}>
+                            {etapa.nombreEtapa}
+                          </span>
+                        </div>
+
+                        <p className="text-[11px] text-slate-700 dark:text-slate-300 font-medium leading-relaxed bg-white/80 dark:bg-slate-800/80 p-2.5 rounded-lg border border-amber-200/60 dark:border-amber-950/60 italic">
+                          &quot;{etapa.indicacionNutricional}&quot;
+                        </p>
+
+                        {/* Racionamiento & Freno por Cachorro Entregado */}
+                        <div className="flex flex-wrap items-center justify-between gap-1.5 text-[11px] pt-1 border-t border-amber-100 dark:border-slate-800">
+                          <div className="flex items-center gap-1 text-slate-600 dark:text-slate-400">
+                            <span>Consumiendo en criadero:</span>
+                            <strong className="text-slate-900 dark:text-white font-bold">
+                              {consumoInfo.cachorrosConsumiendoActivos} cachorros
+                            </strong>
+                            {etapa.consumeAlimentoStock && (
+                              <span className="text-[10px] text-amber-700 dark:text-amber-300 font-mono font-bold">
+                                ({consumoInfo.consumoTotalCamadaKgDia.toFixed(2)} kg/día)
+                              </span>
+                            )}
+                          </div>
+
+                          {consumoInfo.cachorrosEntregados > 0 && (
+                            <span
+                              className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200 flex items-center gap-1"
+                              title={`${consumoInfo.cachorrosEntregados} cachorro(s) con estado ENTREGADO: se restaron automáticamente y dejaron de consumir stock de ración.`}
+                            >
+                              <ShieldCheck className="w-3 h-3 text-emerald-600 shrink-0" />
+                              <span>Freno: {consumoInfo.cachorrosEntregados} entregado(s)</span>
+                            </span>
+                          )}
+
+                          {!etapa.consumeAlimentoStock && (
+                            <span className="text-[10px] font-bold text-purple-700 dark:text-purple-300">
+                              Lactancia materna (Stock inicia día 28)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Puppies in litter preview chips with descriptive collar color */}
                   <div className="pt-2">

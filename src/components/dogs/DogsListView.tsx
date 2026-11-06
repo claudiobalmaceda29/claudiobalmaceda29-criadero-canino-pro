@@ -38,7 +38,10 @@ export const DogsListView: React.FC = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isReactivatingId, setIsReactivatingId] = useState<string | null>(null);
 
-  const isDogRetired = (d: Ejemplar) => d.estado === 'RETIRADO' || d.activoEnPlantel === false;
+  const isDogRetired = (d: Ejemplar) => {
+    const pres = d.estadoPresencia || d.estado;
+    return pres === 'RETIRADO' || pres === 'FALLECIDO' || pres === 'VENDIDO' || d.activoEnPlantel === false;
+  };
 
   const plantelCount = useMemo(
     () => ejemplares.filter((d) => d.esDelPlantel !== false && !d.esExterno && !isDogRetired(d)).length,
@@ -72,7 +75,8 @@ export const DogsListView: React.FC = () => {
           dog.color?.toLowerCase().includes(q);
 
         const matchesSex = filterSex === 'TODOS' || dog.sexo === filterSex;
-        const matchesState = filterState === 'TODOS' || dog.estado === filterState;
+        const pres = dog.estadoPresencia || dog.estado;
+        const matchesState = filterState === 'TODOS' || pres === filterState;
 
         return matchesSearch && matchesSex && matchesState;
       })
@@ -280,9 +284,11 @@ export const DogsListView: React.FC = () => {
             className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 focus:outline-none text-xs cursor-pointer font-medium"
           >
             <option value="TODOS">Todos los estados</option>
-            <option value="ACTIVO">Activos</option>
-            <option value="RETIRADO">Retirados</option>
-            <option value="VENDIDO">Vendidos</option>
+            <option value="ACTIVO">🟢 Activos</option>
+            <option value="RETIRADO">⚪ Retirados</option>
+            <option value="FALLECIDO">⚫ Fallecidos</option>
+            <option value="VENDIDO">🔵 Vendidos</option>
+            <option value="EN_ENTRENAMIENTO">🟣 En Entrenamiento</option>
             <option value="COPROPIEDAD">En Copropiedad</option>
           </select>
         </div>
@@ -333,11 +339,20 @@ export const DogsListView: React.FC = () => {
                         Externo
                       </span>
                     )}
-                    {isDogRetired(dog) && (
+                    {dog.estadoPresencia && dog.estadoPresencia !== 'ACTIVO' ? (
+                      <span className={`ml-1 px-1.5 py-0.2 rounded-full text-white font-black text-[9px] uppercase tracking-wider ${
+                        dog.estadoPresencia === 'FALLECIDO' ? 'bg-slate-700' :
+                        dog.estadoPresencia === 'VENDIDO' ? 'bg-blue-600' :
+                        dog.estadoPresencia === 'EN_ENTRENAMIENTO' ? 'bg-indigo-600' :
+                        'bg-purple-600'
+                      }`}>
+                        {dog.estadoPresencia}
+                      </span>
+                    ) : isDogRetired(dog) ? (
                       <span className="ml-1 px-1.5 py-0.2 rounded-full bg-purple-600 text-white font-black text-[9px] uppercase tracking-wider">
                         Retirado
                       </span>
-                    )}
+                    ) : null}
                   </div>
 
                   <div className="flex items-center gap-1.5">

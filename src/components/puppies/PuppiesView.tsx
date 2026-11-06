@@ -19,6 +19,8 @@ import {
   FolderTree,
   Trash2,
   HeartHandshake,
+  Utensils,
+  ShieldCheck,
 } from 'lucide-react';
 import { PuppyDetailModal } from './PuppyDetailModal';
 import { PuppyFormModal } from './PuppyFormModal';
@@ -26,6 +28,7 @@ import { PostVentaFollowUpModal } from './PostVentaFollowUpModal';
 import { getCollarColorHex, getCollarColorName, formatDateDMY } from '../../lib/dogUtils';
 import { deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
+import { obtenerEtapaNutricionalCachorro } from '../../utils/puppyNutrition';
 
 export const PuppiesView: React.FC = () => {
   const {
@@ -276,6 +279,38 @@ export const PuppiesView: React.FC = () => {
                 )}
               </div>
             )}
+
+            {/* Etapa Nutricional y Estado de Racionamiento */}
+            {pup.fechaNacimiento && (() => {
+              const etapa = obtenerEtapaNutricionalCachorro(pup.fechaNacimiento);
+              const isEntregado = pup.estadoComercial === 'ENTREGADO' || Boolean(pup.comprador?.fechaEntregaReal);
+
+              return (
+                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[11px] space-y-1">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-[10px] uppercase font-bold text-slate-600 flex items-center gap-1">
+                      <Utensils className="w-3 h-3 text-amber-600" />
+                      <span>Alimentación ({etapa.rangoSemanas})</span>
+                    </span>
+                    {isEntregado ? (
+                      <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-700 border border-slate-300 flex items-center gap-0.5">
+                        <ShieldCheck className="w-2.5 h-2.5 text-emerald-600" />
+                        <span>Freno: Entregado</span>
+                      </span>
+                    ) : (
+                      <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded-full border ${etapa.badgeColor}`}>
+                        {etapa.nombreEtapa}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-600 italic leading-snug">
+                    {isEntregado
+                      ? 'Cachorro entregado a su nuevo hogar. Ración diaria excluida del inventario.'
+                      : etapa.indicacionNutricional}
+                  </p>
+                </div>
+              );
+            })()}
 
             {/* Buyer summary if present */}
             {pup.comprador && (

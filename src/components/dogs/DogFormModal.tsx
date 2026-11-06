@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
-import { Ejemplar, Sexo, EstadoReproductivo, EstadoEjemplar, CalificacionDisplasiaCadera, CalificacionDisplasiaCodo } from '../../types';
+import { Ejemplar, Sexo, EstadoReproductivo, EstadoEjemplar, EstadoPresenciaEjemplar, CalificacionDisplasiaCadera, CalificacionDisplasiaCodo } from '../../types';
 import { X, Dog, Save, Image, Check, Upload, Camera, CheckCircle2, Loader2, Trash2, Cloud, Globe, ExternalLink, Download, AlertTriangle, FileText, Sparkles, Eye, ChevronDown, ChevronUp } from 'lucide-react';
 import { uploadDogPhoto, db, auth } from '../../lib/firebase';
 import { collection, addDoc, doc, setDoc, query, where, getDocs } from 'firebase/firestore';
@@ -111,6 +111,9 @@ export const DogFormModal: React.FC<DogFormModalProps> = ({ dog, onClose, isClon
   const [color, setColor] = useState(dog?.color || 'Negro y Fuego');
   const [pelo, setPelo] = useState<'CORTO' | 'LARGO' | 'MEDIO'>(dog?.pelo || 'CORTO');
   const [estadoReproductivo, setEstadoReproductivo] = useState<EstadoReproductivo>(dog?.estadoReproductivo || 'ACTIVO');
+  const [estadoPresencia, setEstadoPresencia] = useState<EstadoPresenciaEjemplar>(
+    (dog?.estadoPresencia as EstadoPresenciaEjemplar) || (dog?.estado as EstadoPresenciaEjemplar) || 'ACTIVO'
+  );
   const [estado, setEstado] = useState<EstadoEjemplar>(dog?.estado || 'ACTIVO');
   const [esDelPlantel, setEsDelPlantel] = useState<boolean>(
     dog?.esDelPlantel !== undefined ? dog.esDelPlantel : (dog?.esExterno !== undefined ? !dog.esExterno : true)
@@ -563,7 +566,8 @@ export const DogFormModal: React.FC<DogFormModalProps> = ({ dog, onClose, isClon
         color: color.trim(),
         pelo,
         estadoReproductivo,
-        estado,
+        estadoPresencia,
+        estado: (estadoPresencia === 'EN_ENTRENAMIENTO' ? 'ACTIVO' : estadoPresencia) as EstadoEjemplar,
         fotoUrl: fotoUrl.trim(),
         pedigreeDatabaseUrl: pedigreeDatabaseUrl.trim() || undefined,
         pedigreeDocUrl: pedigreeDocUrl || undefined,
@@ -882,7 +886,7 @@ export const DogFormModal: React.FC<DogFormModalProps> = ({ dog, onClose, isClon
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Color / Manto</label>
                   <input
@@ -919,7 +923,36 @@ export const DogFormModal: React.FC<DogFormModalProps> = ({ dog, onClose, isClon
                     <option value="RETIRADO">Retirado</option>
                   </select>
                 </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Estado en Criadero *
+                  </label>
+                  <select
+                    value={estadoPresencia}
+                    onChange={(e) => {
+                      const val = e.target.value as EstadoPresenciaEjemplar;
+                      setEstadoPresencia(val);
+                      setEstado((val === 'EN_ENTRENAMIENTO' ? 'ACTIVO' : val) as EstadoEjemplar);
+                    }}
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-slate-900 font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-xs"
+                  >
+                    <option value="ACTIVO">🟢 ACTIVO (Presente en Criadero)</option>
+                    <option value="RETIRADO">⚪ RETIRADO (Jubilado)</option>
+                    <option value="FALLECIDO">⚫ FALLECIDO (Baja definitiva)</option>
+                    <option value="VENDIDO">🔵 VENDIDO (Transferido)</option>
+                    <option value="EN_ENTRENAMIENTO">🟣 EN ENTRENAMIENTO (Externo)</option>
+                  </select>
+                </div>
               </div>
+
+              {estadoPresencia !== 'ACTIVO' && (
+                <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>
+                    <strong>Atención de Alimentación:</strong> Este ejemplar está en estado <strong>{estadoPresencia}</strong>. Se excluirá automáticamente del cálculo y descuento de raciones diarias de alimento en el módulo de Inventario.
+                  </span>
+                </div>
+              )}
 
               {/* PedigreeDatabase.com Integration Box */}
               <div className="p-4 rounded-xl bg-blue-50/60 border border-blue-200 space-y-2.5 shadow-xs">

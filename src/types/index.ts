@@ -39,7 +39,8 @@ export interface Criadero {
 
 export type Sexo = 'MACHO' | 'HEMBRA';
 export type EstadoReproductivo = 'ACTIVO' | 'EN_CELO' | 'GESTANTE' | 'EN_DESCANSO' | 'RETIRADO';
-export type EstadoEjemplar = 'ACTIVO' | 'RETIRADO' | 'FALLECIDO' | 'VENDIDO' | 'COPROPIEDAD';
+export type EstadoPresenciaEjemplar = 'ACTIVO' | 'RETIRADO' | 'FALLECIDO' | 'VENDIDO' | 'EN_ENTRENAMIENTO';
+export type EstadoEjemplar = 'ACTIVO' | 'RETIRADO' | 'FALLECIDO' | 'VENDIDO' | 'COPROPIEDAD' | 'EN_ENTRENAMIENTO';
 export type CalificacionDisplasiaCadera = 
   | 'a1'
   | 'a2'
@@ -84,6 +85,7 @@ export interface Ejemplar {
   color: string;
   pelo: 'CORTO' | 'LARGO' | 'MEDIO';
   estadoReproductivo: EstadoReproductivo;
+  estadoPresencia?: EstadoPresenciaEjemplar;
   estado: EstadoEjemplar;
   fotoUrl: string;
   pedigreeDatabaseUrl?: string; // Link a la ficha en PedigreeDatabase.com
